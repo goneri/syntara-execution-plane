@@ -8,7 +8,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import asyncpg
+import asyncpg  # type: ignore[import-untyped]
 import structlog
 
 from execution_plane.bootstrap import bootstrap_local_cluster

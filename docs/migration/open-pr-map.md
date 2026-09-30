@@ -11,4 +11,4 @@ The migration branch is based on the merged `feat/ANSTRAT-1803` branch snapshot.
 | [#632 — cluster/target/scheduler design](https://github.com/syntara-orchestration/syntara/pull/632) | Reconcile against merged docs and move remaining EP design here. |
 | [#648 — OpenShift cold-start POC](https://github.com/syntara-orchestration/syntara/pull/648) | Keep as a historical POC until it is compared with #723/#701; port only unmerged work that remains needed. |
 
-The Syntara feature branch and its PRs remain available. The source branch archive and `execution-plane-pr-inventory.json` retain the inspected baseline and PR metadata for this migration.
+The Syntara feature branch and its PRs remain available. The migration workspace retains bundles of the source branch and all six open PR heads, plus `execution-plane-pr-inventory.json` with the inspected PR metadata.

@@ -7,6 +7,7 @@ from typing import ClassVar
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
 from execution_plane.config import get_ep_settings
 from execution_plane.script_executor import (
     SAFE_ENV_ALLOWLIST,

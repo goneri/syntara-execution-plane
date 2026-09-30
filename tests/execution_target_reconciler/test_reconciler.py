@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+
 from execution_plane.execution_target_reconciler.filters import (
     HealthFilter,
     LifecycleFilter,

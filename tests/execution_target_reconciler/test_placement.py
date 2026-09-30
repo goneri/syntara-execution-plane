@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
 from execution_plane.execution_target_reconciler.exceptions import UnknownBackendTypeError
 from execution_plane.execution_target_reconciler.placement import PlacementResolver, WorkerManagerRegistry
 from execution_plane.execution_target_reconciler.reconciler import ExecutionTargetReconciler

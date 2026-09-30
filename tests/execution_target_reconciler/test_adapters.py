@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self, cast
 
 import pytest
+
 from execution_plane.cluster.cluster_store import ClusterStore
 from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from execution_plane.execution_target_reconciler.adapters import (

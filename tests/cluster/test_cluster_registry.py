@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Self
 
 import pytest
+
 from execution_plane.models.cluster import Cluster, ClusterStatus, ClusterType
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
 

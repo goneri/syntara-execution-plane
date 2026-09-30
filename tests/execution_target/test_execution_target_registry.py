@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import Self
 
 import pytest
+from sqlalchemy.pool import NullPool
+
 from execution_plane.execution_target.execution_target_registry import ExecutionTargetRegistry
 from execution_plane.execution_target.execution_target_store import (
     DefaultExecutionTargetError,
@@ -15,7 +17,6 @@ from execution_plane.execution_target.execution_target_store import (
 )
 from execution_plane.models.cluster import Cluster, ClusterStatus
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
-from sqlalchemy.pool import NullPool
 
 _DATABASE_UNAVAILABLE = "database unavailable"
 

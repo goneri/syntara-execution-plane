@@ -8,9 +8,10 @@ from typing import Any, Self
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy.pool import NullPool
+
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.work_store import WorkStore
-from sqlalchemy.pool import NullPool
 
 
 class _Session:

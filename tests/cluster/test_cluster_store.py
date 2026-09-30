@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Self
 
 import pytest
+
 from execution_plane.cluster.cluster_store import (
     ClusterNotFoundError,
     ClusterStore,

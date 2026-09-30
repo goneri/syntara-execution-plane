@@ -1,6 +1,7 @@
 """Tests for execution-plane configuration."""
 
 import pytest
+
 from execution_plane.config import EPSettings, ScriptExecutorSettings, to_asyncpg_url
 
 

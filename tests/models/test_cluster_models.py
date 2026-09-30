@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 
-from execution_plane.models.cluster import Cluster, ClusterStatus, ClusterType
-from execution_plane.models.constants import EP_SCHEMA
-from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import String
 from sqlmodel import SQLModel
+
+from execution_plane.models.cluster import Cluster, ClusterStatus, ClusterType
+from execution_plane.models.constants import EP_SCHEMA
+from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
 
 
 def test_cluster_table_exposes_required_lifecycle_and_audit_contract() -> None:

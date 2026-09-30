@@ -1,6 +1,6 @@
 """Temporal client — settings, connection, and async-completion callback.
 
-BOUNDARY CROSSING — see docs/execution-plane/integration.md.
+BOUNDARY CROSSING — see docs/integration.md.
 The EP worker uses Temporal's async-activity-completion API to resume the
 suspended Syntara activity once a script finishes. This module is the only
 place in execution_plane that imports from temporalio; worker.py calls only

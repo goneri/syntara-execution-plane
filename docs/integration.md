@@ -21,9 +21,9 @@ Each is a deliberate shortcut that avoids inter-service complexity (service disc
 
 | # | What it does |
 |---|---|
-| 1 | EP's web router ([`router.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/execution-plane/src/execution_plane/router.py)) — temporarily served by Syntara's web server ([`main.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/api/main.py)); imports `SyntaraRouter`, `PermissionChecker`, and `get_db` from syntara; reads `execution_plane.*` tables |
+| 1 | Syntara's execution-plane API facade ([`execution_plane_router.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/api/execution_plane_router.py)) is served by Syntara's web server ([`main.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/api/main.py)); it applies Syntara authorization and reads the `execution_plane.*` schema through the EP package |
 | 2 | [`ep_dispatch_activity.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/workflows/workflow_engine/activities/ep/ep_dispatch_activity.py) — Writes `WorkItem` row, issues `pg_notify`, stores Temporal task token for EP worker's gRPC callback |
-| 3 | [`worker.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/execution-plane/src/execution_plane/worker.py) — EP worker calls `handle.complete()` — a gRPC call directly into Syntara's Temporal; requires network access to Temporal :7233 |
+| 3 | [`worker.py`](https://github.com/syntara-orchestration/syntara-execution-plane/blob/devel/src/execution_plane/worker.py) — EP worker calls `handle.complete()` — a gRPC call directly into Syntara's Temporal; requires network access to Temporal :7233 |
 | 4 | [`integration_service.py`](https://github.com/syntara-orchestration/syntara/tree/devel/backend/src/syntara/integrations/services/integration_service.py) — Syntara calls `ClusterSyncService` (via `ClusterRegistry`) when Integration (type=openshift) is created/updated/deleted; never reads `execution_plane.clusters` directly |
 
 ---

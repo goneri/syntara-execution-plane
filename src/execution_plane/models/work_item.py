@@ -66,5 +66,5 @@ class WorkItem(SQLModel, table=True):
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
     # Set after handle.complete() / handle.fail() returns successfully.
     # NULL means the Temporal signal may not have been delivered — recovery
-    # queries use this to retry. See docs/execution-plane/integration.md.
+    # queries use this to retry. See docs/integration.md.
     signaled_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))

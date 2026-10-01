@@ -158,6 +158,10 @@ class ClusterRegistry:
         labels: dict[str, str] | None = None,
         *,
         cluster_type: ClusterType = ClusterType.OPENSHIFT,
+        source_client_id: str | None = None,
+        source_integration_id: uuid.UUID | None = None,
+        source_revision: int = 0,
+        project_ids: list[uuid.UUID] | None = None,
     ) -> Cluster:
         """Create a cluster and its sole default execution target from known values.
 
@@ -166,11 +170,26 @@ class ClusterRegistry:
         Raises if target creation fails, leaving the cluster in ERROR state
         for operator recovery.
         """
-        existing = await self._store.get_by_name(name)
-        if existing is not None and existing.status is ClusterStatus.DRAINING:
+        existing = (
+            await self._store.get_by_source(source_client_id, source_integration_id)
+            if source_client_id is not None and source_integration_id is not None
+            else await self._store.get_by_name(name)
+        )
+        if existing is not None and (existing.status is ClusterStatus.DRAINING or not existing.enabled):
             return await self._reactivate(existing, endpoint, api_key, namespace, created_by, labels)
 
-        cluster = await self._store.create(name, endpoint, api_key, created_by, labels, cluster_type=cluster_type)
+        cluster = await self._store.create(
+            name,
+            endpoint,
+            api_key,
+            created_by,
+            labels,
+            cluster_type=cluster_type,
+            source_client_id=source_client_id,
+            source_integration_id=source_integration_id,
+            source_revision=source_revision,
+            project_ids=project_ids,
+        )
         try:
             target = await self._execution_target_registry.create(
                 cluster_id=cluster.id,

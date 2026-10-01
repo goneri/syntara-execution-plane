@@ -1,26 +1,29 @@
-"""Execution Plane TE worker — polls work_items and dispatches to Temporal on completion."""
+"""Execution Plane worker — executes accepted work and records completion events."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable
-from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
 import structlog
 
-from execution_plane.bootstrap import bootstrap_local_cluster
+from execution_plane.cluster.binding_reconciler import run_cluster_binding_reconciler
 from execution_plane.cluster.cluster_store import ClusterStore
 from execution_plane.config import get_ep_settings, to_asyncpg_url
 from execution_plane.drain_monitor import DrainMonitor
+from execution_plane.event_delivery import CompletionEventDelivery
 from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from execution_plane.execution_target_reconciler.adapters import build_placement_resolver
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
-from execution_plane.script_executor import ScriptExecutionError, execute_script
-from execution_plane.temporal_client import send_temporal_callback
 from execution_plane.work_store import WorkStore
+from execution_plane.worker_manager.kubernetes_job import (
+    KubernetesJobManager,
+    WorkloadCancelledError,
+    WorkloadExecutionError,
+    WorkloadOutcomeUnknownError,
+)
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -28,57 +31,74 @@ POLL_INTERVAL_SECONDS = 5
 NOTIFY_CHANNEL = "execution_plane_work_items"
 
 
-CompletionCallback = Callable[[WorkItem], Awaitable[bool]]
-
-
-async def _process_item(item: WorkItem, store: WorkStore, completion_callback: CompletionCallback) -> None:
-    """Execute script, persist result, then send Temporal callback."""
+async def _process_item(
+    item: WorkItem,
+    store: WorkStore,
+    target_store: ExecutionTargetStore,
+    cluster_store: ClusterStore,
+    workload_manager: KubernetesJobManager,
+) -> None:
+    """Dispatch in a workload pod and persist its result or a confirmed failure."""
     wi_id = str(item.id)
-    input_config: dict[str, Any] = item.payload.get("input_config", {})
-    output_config: dict[str, str] | None = item.payload.get("output_config")
+    if item.execution_target_id is None:
+        await store.set_result(
+            item.id,
+            {"error": "No execution target was assigned", "error_type": "TargetUnavailable"},
+            WorkItemStatus.FAILED,
+        )
+        return
+    target = await target_store.get(item.execution_target_id, include_secret=True)
+    if target is None:
+        await store.set_result(
+            item.id,
+            {"error": "Assigned execution target no longer exists", "error_type": "TargetUnavailable"},
+            WorkItemStatus.FAILED,
+        )
+        return
+    cluster = await cluster_store.get(target.cluster_id, include_secret=True)
+    if cluster is None:
+        await store.set_result(
+            item.id,
+            {"error": "Assigned cluster no longer exists", "error_type": "TargetUnavailable"},
+            WorkItemStatus.FAILED,
+        )
+        return
 
+    create_if_missing = item.status is WorkItemStatus.CLAIMED
+    # Record the external-dispatch boundary before a request whose response may
+    # be lost. Recovery only attaches to the deterministic Job.
+    if create_if_missing and not await store.mark_dispatched(item.id):
+        return
     try:
-        activity_result = await execute_script(input_config, output_config)
+        activity_result = await workload_manager.execute(
+            work_item_id=item.id,
+            endpoint=cluster.endpoint,
+            api_token=cluster.api_key,
+            ca_certificate=cluster.ca_certificate,
+            namespace=target.namespace,
+            payload=item.payload,
+            create_if_missing=create_if_missing,
+            heartbeat=lambda: store.refresh_claim(item.id),
+        )
         item = await store.set_result(item.id, activity_result, WorkItemStatus.COMPLETED)
         logger.info("Script executed successfully", work_item_id=wi_id)
-    except ScriptExecutionError as e:
-        item = await store.set_result(
+    except WorkloadExecutionError as exc:
+        await store.set_result(item.id, exc.result, WorkItemStatus.FAILED)
+        logger.warning("Isolated workload failed", work_item_id=wi_id, error=str(exc))
+    except WorkloadCancelledError as exc:
+        await store.set_result(
             item.id,
-            {
-                "error": str(e),
-                "error_type": "ScriptExecutionError",
-                "exit_code": e.exit_code,
-                "stdout": e.stdout,
-                "stderr": e.stderr,
-            },
-            WorkItemStatus.FAILED,
+            {"cancelled": True, "execution_started": exc.execution_started, "reason": str(exc)},
+            WorkItemStatus.CANCELLED,
         )
-        logger.warning("Script execution failed", work_item_id=wi_id, error=str(e))
+        logger.info("Isolated workload cancellation confirmed", work_item_id=wi_id)
+    except WorkloadOutcomeUnknownError as exc:
+        # Keep the uncertain result visible and recover only by attaching to the
+        # deterministic Job; never create a second Job for an ambiguous dispatch.
+        await store.mark_reconciliation_required(item.id, str(exc))
+        logger.exception("Isolated workload outcome needs reconciliation", work_item_id=wi_id, error=str(exc))
     except Exception as e:
-        item = await store.set_result(
-            item.id,
-            {"error": str(e), "error_type": type(e).__name__},
-            WorkItemStatus.FAILED,
-        )
-        logger.exception("Unexpected error processing work item", work_item_id=wi_id)
-
-    if await completion_callback(item):
-        await store.mark_signal_delivered(item.id)
-
-
-async def _recover_undelivered(store: WorkStore, completion_callback: CompletionCallback) -> None:
-    """Retry callbacks for items that completed but were never confirmed delivered.
-
-    Runs once at startup. Bounded query: only terminal items with NULL signaled_at.
-    Each store operation owns its own short-lived session.
-    """
-    items = await store.find_undelivered()
-    if not items:
-        return
-    logger.info("Recovering undelivered Temporal callbacks", count=len(items))
-    for item in items:
-        if await completion_callback(item):
-            await store.mark_signal_delivered(item.id)
+        logger.exception("Could not reconcile isolated workload", work_item_id=wi_id, error_type=type(e).__name__)
 
 
 async def _listen_loop(database_url: str, wakeup_event: asyncio.Event) -> None:
@@ -113,8 +133,10 @@ async def _listen_loop(database_url: str, wakeup_event: asyncio.Event) -> None:
 
 async def _poll_loop(
     store: WorkStore,
+    target_store: ExecutionTargetStore,
+    cluster_store: ClusterStore,
+    workload_manager: KubernetesJobManager,
     wakeup_event: asyncio.Event,
-    completion_callback: CompletionCallback,
 ) -> None:
     """Claim one work item at a time; sleep between polls when queue is empty."""
     logger.info("Execution Plane worker started, polling for work items")
@@ -125,7 +147,7 @@ async def _poll_loop(
             item = await store.claim_one()
             if item:
                 logger.info("Claimed work item", work_item_id=str(item.id))
-                await _process_item(item, store, completion_callback)
+                await _process_item(item, store, target_store, cluster_store, workload_manager)
         except Exception:
             logger.exception("Error in polling loop, will retry")
 
@@ -135,21 +157,20 @@ async def _poll_loop(
                 await asyncio.wait_for(wakeup_event.wait(), timeout=POLL_INTERVAL_SECONDS)
 
 
-async def run_worker(
-    database_url: str,
-    completion_callback: CompletionCallback = send_temporal_callback,
-) -> None:
-    """Run processing until cancelled, using the supplied database and callback.
+async def run_worker(database_url: str) -> None:
+    """Run processing and callback delivery against the EP-owned database.
 
     Cancellation closes both the notification listener and the polling task,
     then disposes the WorkStore.
     """
-    await bootstrap_local_cluster(database_url)
+    settings = get_ep_settings()
     async with (
         WorkStore.from_database_url(database_url) as work_store,
         ClusterStore.from_database_url(database_url) as cluster_store,
         ExecutionTargetStore.from_database_url(database_url) as target_store,
     ):
+        event_delivery = CompletionEventDelivery(settings)
+        workload_manager = KubernetesJobManager(settings)
         drain_monitor = DrainMonitor(target_store, cluster_store, work_store)
         placement_resolver = build_placement_resolver(cluster_store, target_store)
         logger.debug(
@@ -158,16 +179,21 @@ async def run_worker(
         )
         await drain_monitor.start()
         try:
-            await _recover_undelivered(work_store, completion_callback)
             wakeup_event = asyncio.Event()
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(
                     _listen_loop(to_asyncpg_url(database_url), wakeup_event),
                     name="ep-listener",
                 )
-                tg.create_task(_poll_loop(work_store, wakeup_event, completion_callback), name="ep-poll")
+                tg.create_task(
+                    _poll_loop(work_store, target_store, cluster_store, workload_manager, wakeup_event),
+                    name="ep-poll",
+                )
+                tg.create_task(event_delivery.run(work_store), name="ep-completion-delivery")
+                tg.create_task(run_cluster_binding_reconciler(database_url), name="ep-cluster-bindings")
         finally:
             await drain_monitor.stop()
+            await event_delivery.close()
 
 
 async def _run() -> None:

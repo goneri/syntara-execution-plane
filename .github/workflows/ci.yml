@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [devel]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -41,7 +42,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/syntara-orchestration/execution-plane-worker
+          images: ghcr.io/syntara-orchestration/execution-plane
           tags: |
             type=ref,event=tag
             type=sha

@@ -43,6 +43,11 @@ class ClusterStore(StoreBase):
         labels: dict[str, str] | None = None,
         *,
         cluster_type: ClusterType = ClusterType.OPENSHIFT,
+        source_client_id: str | None = None,
+        source_integration_id: uuid.UUID | None = None,
+        source_revision: int = 0,
+        project_ids: list[uuid.UUID] | None = None,
+        ca_certificate: str | None = None,
     ) -> Cluster:
         """Persist a new Cluster in REGISTERING state."""
         now = datetime.now(UTC)
@@ -50,7 +55,12 @@ class ClusterStore(StoreBase):
             name=name,
             endpoint=endpoint,
             api_key=api_key,
+            ca_certificate=ca_certificate,
             cluster_type=cluster_type,
+            source_client_id=source_client_id,
+            source_integration_id=source_integration_id,
+            source_revision=source_revision,
+            project_ids=project_ids,
             labels=labels or {},
             status=ClusterStatus.REGISTERING,
             created_by=created_by,
@@ -67,18 +77,57 @@ class ClusterStore(StoreBase):
                 await session.rollback()
                 raise
 
-    async def get(self, cluster_id: uuid.UUID) -> Cluster | None:
-        """Return a Cluster without its API credential."""
+    async def get(self, cluster_id: uuid.UUID, *, include_secret: bool = False) -> Cluster | None:
+        """Return a Cluster, redacting its API credential unless execution needs it."""
         async with self._session_context() as session:
             cluster = await session.get(Cluster, cluster_id)
-            return None if cluster is None else self._without_secret(cluster)
+            return None if cluster is None or include_secret else self._without_secret(cluster)
 
     async def get_by_name(self, name: str) -> Cluster | None:
         """Return a Cluster by name without its API credential."""
         async with self._session_context() as session:
-            result = await session.execute(select(Cluster).where(col(Cluster.name) == name))
+            result = await session.execute(select(Cluster).where(col(Cluster.name) == name).limit(1))
             cluster = result.scalar_one_or_none()
             return None if cluster is None else self._without_secret(cluster)
+
+    async def get_by_source(self, client_id: str, integration_id: uuid.UUID) -> Cluster | None:
+        """Return a cluster by its stable external owner and integration identity."""
+        async with self._session_context() as session:
+            result = await session.execute(
+                select(Cluster)
+                .where(col(Cluster.source_client_id) == client_id)
+                .where(col(Cluster.source_integration_id) == integration_id)
+            )
+            cluster = result.scalar_one_or_none()
+            return None if cluster is None else self._without_secret(cluster)
+
+    async def update_source_binding(
+        self,
+        cluster_id: uuid.UUID,
+        *,
+        client_id: str,
+        integration_id: uuid.UUID,
+        revision: int,
+        project_ids: list[uuid.UUID] | None,
+        ca_certificate: str | None = None,
+    ) -> Cluster:
+        """Persist stable source identity, observed revision, and project grants."""
+        async with self._session_context() as session:
+            try:
+                cluster = await session.get(Cluster, cluster_id, with_for_update=True)
+                if cluster is None:
+                    raise ClusterNotFoundError(cluster_id)  # noqa: TRY301
+                cluster.source_client_id = client_id
+                cluster.source_integration_id = integration_id
+                cluster.source_revision = revision
+                cluster.project_ids = project_ids
+                cluster.ca_certificate = ca_certificate
+                cluster.updated_at = datetime.now(UTC)
+                await session.commit()
+                return self._without_secret(cluster)
+            except Exception:
+                await session.rollback()
+                raise
 
     async def list(self, *, status: ClusterStatus | None = None, enabled: bool | None = None) -> list[Cluster]:
         """List Clusters for administrative or recovery workflows."""
@@ -99,6 +148,7 @@ class ClusterStore(StoreBase):
         name: str | None = None,
         endpoint: str | None = None,
         api_key: str | None = None,
+        ca_certificate: str | None = None,
     ) -> Cluster:
         """Update mutable cluster fields."""
         async with self._session_context() as session:
@@ -112,6 +162,8 @@ class ClusterStore(StoreBase):
                     cluster.endpoint = endpoint
                 if api_key is not None:
                     cluster.api_key = api_key
+                if ca_certificate is not None:
+                    cluster.ca_certificate = ca_certificate
                 cluster.updated_by = updated_by
                 cluster.updated_at = datetime.now(UTC)
                 await session.commit()
@@ -127,6 +179,7 @@ class ClusterStore(StoreBase):
         updated_by: uuid.UUID,
         endpoint: str | None = None,
         api_key: str | None = None,
+        ca_certificate: str | None = None,
         labels: dict[str, str] | None = None,
     ) -> Cluster:
         """Re-enable a DRAINING cluster and transition it back to ACTIVE."""
@@ -142,6 +195,8 @@ class ClusterStore(StoreBase):
                     cluster.endpoint = endpoint
                 if api_key is not None:
                     cluster.api_key = api_key
+                if ca_certificate is not None:
+                    cluster.ca_certificate = ca_certificate
                 if labels is not None:
                     cluster.labels = labels
                 cluster.updated_by = updated_by
@@ -249,4 +304,4 @@ class ClusterStore(StoreBase):
 
     @staticmethod
     def _without_secret(cluster: Cluster) -> Cluster:
-        return cluster.model_copy(update={"api_key": ""})
+        return cluster.model_copy(update={"api_key": "", "ca_certificate": None})

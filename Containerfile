@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN pip3.12 install --no-cache-dir uv==0.12.3
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md alembic.ini ./
 COPY src/ ./src/
 
 RUN uv sync --frozen --no-dev --no-editable

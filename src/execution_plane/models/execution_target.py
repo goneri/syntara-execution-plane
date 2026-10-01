@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, Index, String, UniqueConstraint, text
+from sqlalchemy import Column, Index, UniqueConstraint, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import DateTime
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from execution_plane.models.cluster import Cluster
 
 from execution_plane.models.constants import EP_SCHEMA
+from execution_plane.models.credential import EncryptedCredential
 
 
 class BackendType(StrEnum):
@@ -77,7 +78,7 @@ class ExecutionTarget(SQLModel, table=True):
     )
     enabled: bool = True
     is_default: bool = Field(default=False, nullable=False)
-    api_key: str = Field(sa_column=Column(String, nullable=False), repr=False, exclude=True)
+    api_key: str = Field(sa_column=Column(EncryptedCredential(), nullable=False), repr=False, exclude=True)
     status_message: str | None = Field(default=None, nullable=True)
     labels: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False, server_default="{}"))
     created_by: uuid.UUID = Field(nullable=False)

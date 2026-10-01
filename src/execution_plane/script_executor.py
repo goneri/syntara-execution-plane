@@ -1,8 +1,4 @@
-"""Script execution utilities for the Execution Plane worker.
-
-Everything a TE worker needs to run a script and produce a Temporal-compatible
-activity result. No dependencies on the main syntara package.
-"""
+"""Script execution utilities for the Execution Plane worker."""
 
 from __future__ import annotations
 
@@ -228,22 +224,16 @@ def _enforce_payload_limit(
     result_dict: dict[str, Any],
     max_bytes: int | None = None,
 ) -> dict[str, Any]:
-    """Truncate stdout/stderr so the serialized activity result fits within Temporal's payload limit.
+    """Truncate stdout/stderr to keep the completion event within EP's configured limit.
 
-    Temporal's server-side limit.blobSize.error rejects oversized activity results.
-    The SDK treats the rejection as retryable, causing futile retries until the
-    activity times out. This check prevents that by truncating before the payload
-    leaves the worker.
-
-    ``max_bytes`` defaults to ``EPSettings.temporal_payload_max_bytes`` (90% of
-    ``temporal_blob_size_error``). The 10% headroom covers JSON escaping expansion
-    and protobuf envelope overhead. Pass an explicit value in tests.
+    ``max_bytes`` defaults to ``EP_MAX_COMPLETION_RESULT_BYTES``. Pass an explicit
+    value when a caller needs a narrower transport limit.
 
     Returns a new dict (does not mutate the input). Truncation operates on raw
     UTF-8 bytes, not the JSON-escaped form.
     """
     if max_bytes is None:
-        max_bytes = get_script_executor_settings().temporal_payload_max_bytes
+        max_bytes = get_script_executor_settings().max_completion_result_bytes
     serialized = json.dumps(result_dict)
     payload_size = len(serialized.encode("utf-8"))
     if payload_size <= max_bytes:
@@ -256,8 +246,8 @@ def _enforce_payload_limit(
     stderr = output.get("stderr") or ""
 
     notice = (
-        f"\n[Payload truncated: serialized activity result ({payload_size} bytes)"
-        f" exceeded Temporal payload limit ({max_bytes} bytes)]"
+        f"\n[Payload truncated: serialized execution result ({payload_size} bytes)"
+        f" exceeded EP completion-result limit ({max_bytes} bytes)]"
     )
     notice_bytes = len(notice.encode("utf-8"))
     trim_needed = excess + notice_bytes
@@ -456,11 +446,11 @@ async def execute_script(
     input_config: dict[str, Any],
     output_config: dict[str, str] | None,
 ) -> dict[str, Any]:
-    """Run a script from a WorkItem payload and return a Temporal activity result dict.
+    """Run a script from a WorkItem payload and return its structured result.
 
     Parses language/code/environment directly from the payload dict (no Pydantic validation).
     Applies cgroup memory limits, executes the subprocess, parses JSON output for Python scripts,
-    and enforces the Temporal payload size limit before returning.
+    and enforces the configured completion-result size limit before returning.
 
     Raises ScriptExecutionError on non-zero exit, TimeoutError on timeout.
     """

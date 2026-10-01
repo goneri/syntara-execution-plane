@@ -100,7 +100,15 @@ class EPSettings(ScriptExecutorSettings):
             raise ValueError(msg)
         for network in allowed_networks:
             for denied in forbidden_networks:
-                if network.overlaps(denied) and not denied.subnet_of(network):
+                if isinstance(network, ipaddress.IPv4Network):
+                    if not isinstance(denied, ipaddress.IPv4Network):
+                        continue
+                    partial_overlap = network.overlaps(denied) and not denied.subnet_of(network)
+                else:
+                    if not isinstance(denied, ipaddress.IPv6Network):
+                        continue
+                    partial_overlap = network.overlaps(denied) and not denied.subnet_of(network)
+                if partial_overlap:
                     msg = f"Forbidden egress range {denied} must be contained by allowed range {network}"
                     raise ValueError(msg)
         return self

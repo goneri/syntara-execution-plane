@@ -8,7 +8,7 @@ import ipaddress
 import json
 import ssl
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -175,7 +175,13 @@ class KubernetesJobManager:
             }
         ]
         for network in allowed_networks:
-            exclusions = [str(denied) for denied in forbidden_networks if denied.subnet_of(network)]
+            exclusions = []
+            for denied in forbidden_networks:
+                if isinstance(network, ipaddress.IPv4Network):
+                    if isinstance(denied, ipaddress.IPv4Network) and denied.subnet_of(network):
+                        exclusions.append(str(denied))
+                elif isinstance(denied, ipaddress.IPv6Network) and denied.subnet_of(network):
+                    exclusions.append(str(denied))
             ip_block: dict[str, Any] = {"cidr": str(network)}
             if exclusions:
                 ip_block["except"] = exclusions
@@ -553,7 +559,7 @@ class KubernetesJobManager:
         if not isinstance(result, dict) or not isinstance(result.get("result"), dict):
             raise WorkloadOutcomeUnknownError("Workload result envelope has an invalid shape")
         if result.get("status") == "completed":
-            return result["result"]
+            return cast("dict[str, Any]", result["result"])
         if result.get("status") == "failed":
             failure = result["result"]
             raise WorkloadExecutionError(str(failure.get("error", "Script execution failed")), failure)

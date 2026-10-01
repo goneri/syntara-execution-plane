@@ -32,12 +32,8 @@ class TestScriptExecutorSettingsDefaults:
     def test_max_env_var_length_default(self) -> None:
         assert ScriptExecutorSettings().max_env_var_length == 32768
 
-    def test_temporal_blob_size_error_default(self) -> None:
-        assert ScriptExecutorSettings().temporal_blob_size_error == 2_097_152
-
-    def test_temporal_payload_max_bytes_is_ninety_percent_of_blob_size_error(self) -> None:
-        settings = ScriptExecutorSettings()
-        assert settings.temporal_payload_max_bytes == int(settings.temporal_blob_size_error * 0.9)
+    def test_max_completion_result_bytes_default(self) -> None:
+        assert ScriptExecutorSettings().max_completion_result_bytes == 1_887_436
 
 
 class TestScriptExecutorSettingsEnvVars:
@@ -55,20 +51,22 @@ class TestScriptExecutorSettingsEnvVars:
         monkeypatch.setenv("MAX_ENV_VAR_LENGTH", "65536")
         assert ScriptExecutorSettings().max_env_var_length == 65536
 
-    def test_temporal_blob_size_error_from_env_propagates_to_payload_max(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("TEMPORAL_BLOB_SIZE_ERROR", "4194304")  # 4 MB
-        settings = ScriptExecutorSettings()
-        assert settings.temporal_blob_size_error == 4_194_304
-        assert settings.temporal_payload_max_bytes == int(4_194_304 * 0.9)
+    def test_max_completion_result_bytes_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EP_MAX_COMPLETION_RESULT_BYTES", "4194304")
+        assert ScriptExecutorSettings().max_completion_result_bytes == 4_194_304
 
 
 class TestEPSettingsInheritsScriptSettings:
     """EPSettings exposes the same script fields via inheritance."""
 
-    def test_ep_settings_has_script_cleanup_terminate_timeout(self) -> None:
-        settings = EPSettings()  # type: ignore[call-arg]
+    def test_ep_settings_has_script_cleanup_terminate_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EP_DATABASE_URL", "postgresql+asyncpg://ep:ep@localhost/execution_plane")
+        monkeypatch.setenv("EP_CREDENTIAL_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        settings = EPSettings()
         assert settings.script_cleanup_terminate_timeout == 1.0
 
-    def test_ep_settings_has_temporal_payload_max_bytes(self) -> None:
-        settings = EPSettings()  # type: ignore[call-arg]
-        assert settings.temporal_payload_max_bytes == int(2_097_152 * 0.9)
+    def test_ep_settings_exposes_completion_result_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("EP_DATABASE_URL", "postgresql+asyncpg://ep:ep@localhost/execution_plane")
+        monkeypatch.setenv("EP_CREDENTIAL_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+        settings = EPSettings()
+        assert settings.max_completion_result_bytes == 1_887_436

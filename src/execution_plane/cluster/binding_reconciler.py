@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlmodel import col
 
 from execution_plane.cluster.cluster_registry import ClusterRegistry, NoopDiscoveryMechanism
 from execution_plane.cluster.cluster_store import ClusterStore
@@ -60,14 +61,14 @@ class ClusterBindingReconciler:
                 select(ClusterBinding)
                 .where(
                     or_(
-                        ClusterBinding.status.in_(["pending", "error", "deleting"]),
+                        col(ClusterBinding.status).in_(["pending", "error", "deleting"]),
                         and_(
-                            ClusterBinding.status == "reconciling",
-                            ClusterBinding.updated_at < datetime.now(UTC) - timedelta(seconds=60),
+                            col(ClusterBinding.status) == "reconciling",
+                            col(ClusterBinding.updated_at) < datetime.now(UTC) - timedelta(seconds=60),
                         ),
                     )
                 )
-                .order_by(ClusterBinding.updated_at)
+                .order_by(col(ClusterBinding.updated_at))
                 .limit(50)
                 .with_for_update(skip_locked=True)
             )

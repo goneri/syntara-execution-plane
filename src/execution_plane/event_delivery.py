@@ -10,6 +10,7 @@ import httpx
 import structlog
 
 from execution_plane.api.schemas import CompletionEventRequest
+from execution_plane.models.work_item import WorkItemStatus
 
 if TYPE_CHECKING:
     from execution_plane.config import EPSettings
@@ -73,7 +74,7 @@ class CompletionEventDelivery:
             work_id=event.work_item_id,
             request_id=event.request_id,
             state_revision=event.state_revision,
-            status=event.status,
+            status=WorkItemStatus(event.status),
             result=event.result,
             completed_at=event.created_at,
         )

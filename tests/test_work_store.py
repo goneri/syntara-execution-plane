@@ -37,7 +37,14 @@ class _Session:
     async def rollback(self) -> None:
         self.rollbacks += 1
 
-    async def get(self, _model: object, _item_id: uuid.UUID) -> WorkItem | None:
+    async def get(
+        self,
+        _model: object,
+        _item_id: uuid.UUID,
+        *,
+        with_for_update: bool = False,
+    ) -> WorkItem | None:
+        del with_for_update
         return self.item
 
 
@@ -77,15 +84,21 @@ async def test_dispatch_owns_session_and_commits_notification() -> None:
     """Dispatch uses an internally managed session and commits the notification."""
     store = _store()
     session = _Session()
-    session.execute.return_value = None
+    session.execute.return_value = _ClaimResult(None)
     store._session_factory = _SessionFactory(session)  # type: ignore[assignment]
 
-    item = await store.dispatch("handle", uuid.uuid4(), {"input_config": {}})
+    item = await store.dispatch(
+        "test-client",
+        uuid.uuid4(),
+        "request-1",
+        uuid.uuid4(),
+        {"input_config": {}},
+    )
 
     assert item.status == WorkItemStatus.PENDING
     assert session.added is item
     assert session.commits == 1
-    session.execute.assert_awaited_once()
+    session.execute.assert_awaited()
     await store.close()
 
 
@@ -95,8 +108,11 @@ async def test_set_result_reloads_item_by_id() -> None:
     store = _store()
     item = WorkItem(
         id=uuid.uuid4(),
+        client_id="test-client",
+        project_id=uuid.uuid4(),
+        request_id="request-1",
+        request_hash="request-hash",
         work_correlation_id=uuid.uuid4(),
-        activity_handle="handle",
         created_at=datetime.now(UTC),
     )
     session = _Session(item)

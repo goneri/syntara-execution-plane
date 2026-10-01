@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Self
 
 import pytest
@@ -31,12 +32,23 @@ class _DrainMonitor:
         self.events.append("monitor:stop")
 
 
+class _CompletionDelivery:
+    def __init__(self, _settings: object, events: list[str]) -> None:
+        self.events = events
+
+    async def run(self, _store: object) -> None:
+        self.events.append("delivery:run")
+
+    async def close(self) -> None:
+        self.events.append("delivery:stop")
+
+
 @pytest.mark.asyncio
 async def test_run_worker_owns_drain_monitor_for_the_worker_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
     from execution_plane import worker
 
     events: list[str] = []
-    monkeypatch.setattr(worker, "bootstrap_local_cluster", _bootstrap)
+    monkeypatch.setattr(worker, "get_ep_settings", lambda: SimpleNamespace())
 
     monkeypatch.setattr(
         "execution_plane.worker.WorkStore.from_database_url",
@@ -55,9 +67,12 @@ async def test_run_worker_owns_drain_monitor_for_the_worker_lifetime(monkeypatch
         "DrainMonitor",
         lambda target, cluster, work: _DrainMonitor(target, cluster, work, events),
     )
-    monkeypatch.setattr(worker, "_recover_undelivered", _recover)
+    monkeypatch.setattr(worker, "CompletionEventDelivery", lambda settings: _CompletionDelivery(settings, events))
+    monkeypatch.setattr(worker, "KubernetesJobManager", lambda _settings: object())
+    monkeypatch.setattr(worker, "build_placement_resolver", lambda _cluster, _target: object())
     monkeypatch.setattr(worker, "_listen_loop", _finished_listener)
     monkeypatch.setattr(worker, "_poll_loop", _finished_poller)
+    monkeypatch.setattr(worker, "run_cluster_binding_reconciler", _finished_reconciler)
 
     await worker.run_worker("postgresql+asyncpg://localhost/syntara")
 
@@ -65,17 +80,13 @@ async def test_run_worker_owns_drain_monitor_for_the_worker_lifetime(monkeypatch
     assert events.index("monitor:stop") < events.index("work:stop")
 
 
-async def _bootstrap(_database_url: str) -> None:
-    return None
-
-
-async def _recover(_store: object, _completion_callback: object) -> None:
-    return None
-
-
 async def _finished_listener(_database_url: str, _wakeup_event: object) -> None:
     return None
 
 
-async def _finished_poller(_store: object, _wakeup_event: object, _completion_callback: object) -> None:
+async def _finished_poller(*_args: object) -> None:
+    return None
+
+
+async def _finished_reconciler(_database_url: str) -> None:
     return None

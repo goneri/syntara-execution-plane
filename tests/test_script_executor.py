@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from execution_plane.config import get_ep_settings
+from execution_plane.config import ScriptExecutorSettings
 from execution_plane.script_executor import (
     SAFE_ENV_ALLOWLIST,
     ScriptExecutionError,
@@ -526,7 +526,7 @@ class TestSanitizeEnvValue:
 
     def test_exceeds_max_length_raises(self) -> None:
         with pytest.raises(ValueError, match="maximum length"):
-            _sanitize_env_value("x" * (get_ep_settings().max_env_var_length + 1))
+            _sanitize_env_value("x" * (ScriptExecutorSettings().max_env_var_length + 1))
 
     def test_normal_string_passes(self) -> None:
         assert _sanitize_env_value("hello") == "hello"

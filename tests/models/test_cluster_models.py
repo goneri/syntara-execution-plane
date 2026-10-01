@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 
 from execution_plane.models.cluster import Cluster, ClusterStatus, ClusterType
 from execution_plane.models.constants import EP_SCHEMA
+from execution_plane.models.credential import EncryptedCredential
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
 
 
@@ -27,12 +28,14 @@ def test_cluster_table_exposes_required_lifecycle_and_audit_contract() -> None:
     }
     assert set(ClusterType) == {ClusterType.OPENSHIFT, ClusterType.RHEL}
     assert any(
-        constraint.name == "clusters_endpoint_key" and {column.name for column in constraint.columns} == {"endpoint"}
+        constraint.name == "uq_clusters_source_integration"
+        and {column.name for column in constraint.columns} == {"source_client_id", "source_integration_id"}
         for constraint in table.constraints
     )
     assert table.c.api_key.nullable is False
     assert table.c.labels.type.__class__.__name__ == "JSONB"
-    assert isinstance(table.c.api_key.type, String)
+    assert isinstance(table.c.api_key.type, EncryptedCredential)
+    assert isinstance(table.c.api_key.type.impl, String)
     assert table.c.created_at.type.timezone is True
     assert table.c.updated_at.type.timezone is True
     assert {"created_by", "created_at", "updated_by", "updated_at"} <= set(table.c.keys())
@@ -66,7 +69,8 @@ def test_execution_target_belongs_to_cluster_with_default_and_draining_state() -
     assert table.c.is_default.default.arg is False
     assert TargetStatus.DRAINING.value == "draining"
     assert table.c.api_key.nullable is False
-    assert isinstance(table.c.api_key.type, String)
+    assert isinstance(table.c.api_key.type, EncryptedCredential)
+    assert isinstance(table.c.api_key.type.impl, String)
     assert table.c.updated_at.type.timezone is True
     assert {"created_by", "created_at", "updated_by", "updated_at"} <= set(table.c.keys())
     assert "secret" not in repr(

@@ -17,6 +17,7 @@ from execution_plane.execution_target.execution_target_registry import Execution
 from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from execution_plane.models.cluster import Cluster, ClusterStatus
 from execution_plane.models.cluster_binding import ClusterBinding
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -128,7 +129,7 @@ class ClusterBindingReconciler:
                 binding.name,
                 binding.endpoint,
                 binding.credential,
-                binding.namespace,
+                KubernetesPlacement(namespace=binding.namespace),
                 SYSTEM_ACTOR_ID,
                 binding.labels,
                 source_client_id=binding.client_id,
@@ -152,7 +153,7 @@ class ClusterBindingReconciler:
                 binding.name,
                 binding.endpoint,
                 binding.credential,
-                binding.namespace,
+                KubernetesPlacement(namespace=binding.namespace),
                 SYSTEM_ACTOR_ID,
                 binding.labels,
                 source_client_id=binding.client_id,
@@ -166,7 +167,7 @@ class ClusterBindingReconciler:
             name=binding.name,
             endpoint=binding.endpoint,
             api_key=binding.credential,
-            namespace=binding.namespace,
+            placement=KubernetesPlacement(namespace=binding.namespace),
         )
         current = await self._cluster_store.update_source_binding(
             current.id,

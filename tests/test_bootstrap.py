@@ -9,6 +9,7 @@ import pytest
 
 from execution_plane.models.cluster import Cluster, ClusterStatus
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 
 
 def _cluster() -> Cluster:
@@ -79,6 +80,7 @@ class _ExecutionTargetStore:
         api_key: str,
         is_default: bool,  # noqa: FBT001
         created_by: uuid.UUID,
+        placement: KubernetesPlacement,
         labels: dict[str, str] | None = None,
         **_: object,
     ) -> ExecutionTarget:
@@ -88,6 +90,7 @@ class _ExecutionTargetStore:
             name=name,
             backend_type=backend_type,
             endpoint=endpoint,
+            placement=placement,
             api_key=api_key,
             is_default=is_default,
             created_by=created_by,
@@ -141,7 +144,7 @@ async def test_bootstrap_is_idempotent_for_existing_cluster_and_target(
         cluster_id=cluster.id,
         name="local-default",
         endpoint="local://execution-plane/default",
-        namespace="execution",
+        placement=KubernetesPlacement(namespace="execution"),
         api_key="target-secret",
         backend_type=BackendType.VANILLA_K8S,
         is_default=True,
@@ -174,6 +177,7 @@ async def test_bootstrap_rejects_incomplete_existing_registration(monkeypatch: p
         cluster_id=cluster.id,
         name="local-default",
         endpoint="local://execution-plane/default",
+        placement=KubernetesPlacement(namespace="execution"),
         api_key="target-secret",
         backend_type=BackendType.VANILLA_K8S,
         is_default=True,
@@ -228,7 +232,7 @@ async def test_bootstrap_is_noop_for_non_local_cluster_with_healthy_default_targ
         cluster_id=cluster.id,
         name="remote-default",
         endpoint=cluster.endpoint,
-        namespace="execution",
+        placement=KubernetesPlacement(namespace="execution"),
         api_key="target-secret",
         backend_type=BackendType.VANILLA_K8S,
         is_default=True,

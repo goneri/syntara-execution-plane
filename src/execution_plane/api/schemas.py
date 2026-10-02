@@ -9,6 +9,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from execution_plane.models.execution_target import BackendType, TargetStatus
+from execution_plane.models.execution_target_placement import ExecutionTargetPlacement
 from execution_plane.models.work_item import WorkItemStatus
 
 
@@ -96,12 +97,14 @@ class WorkItemRead(BaseModel):
 class ExecutionTargetRead(BaseModel):
     """Safe execution-target representation without management credentials."""
 
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     cluster_id: uuid.UUID
     name: str
     backend_type: BackendType
     endpoint: str
-    namespace: str
+    placement: ExecutionTargetPlacement
     status: TargetStatus
     enabled: bool
     is_default: bool

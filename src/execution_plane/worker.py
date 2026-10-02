@@ -16,6 +16,7 @@ from execution_plane.drain_monitor import DrainMonitor
 from execution_plane.event_delivery import CompletionEventDelivery
 from execution_plane.execution_target.execution_target_store import ExecutionTargetStore
 from execution_plane.execution_target_reconciler.adapters import build_placement_resolver
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.work_store import WorkStore
 from execution_plane.worker_manager.kubernetes_job import (
@@ -55,6 +56,16 @@ async def _process_item(
             WorkItemStatus.FAILED,
         )
         return
+    if not isinstance(target.placement, KubernetesPlacement):
+        await store.set_result(
+            item.id,
+            {
+                "error": "Assigned execution target placement is not supported by this worker",
+                "error_type": "TargetUnavailable",
+            },
+            WorkItemStatus.FAILED,
+        )
+        return
     cluster = await cluster_store.get(target.cluster_id, include_secret=True)
     if cluster is None:
         await store.set_result(
@@ -75,7 +86,7 @@ async def _process_item(
             endpoint=cluster.endpoint,
             api_token=cluster.api_key,
             ca_certificate=cluster.ca_certificate,
-            namespace=target.namespace,
+            namespace=target.placement.namespace,
             payload=item.payload,
             create_if_missing=create_if_missing,
             heartbeat=lambda: store.refresh_claim(item.id),

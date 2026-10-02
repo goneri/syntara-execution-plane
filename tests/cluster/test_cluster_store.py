@@ -14,6 +14,7 @@ from execution_plane.cluster.cluster_store import (
 )
 from execution_plane.models.cluster import Cluster, ClusterStatus
 from execution_plane.models.execution_target import BackendType, ExecutionTarget, TargetStatus
+from execution_plane.models.execution_target_placement import KubernetesPlacement
 
 _DATABASE_UNAVAILABLE = "database unavailable"
 
@@ -42,6 +43,7 @@ def _target(cluster_id: uuid.UUID) -> ExecutionTarget:
         name="target-a",
         backend_type=BackendType.VANILLA_K8S,
         endpoint="https://target.example",
+        placement=KubernetesPlacement(namespace="execution"),
         api_key="secret",
         status=TargetStatus.ACTIVE,
         created_by=uuid.uuid4(),

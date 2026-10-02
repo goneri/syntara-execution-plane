@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 
 from execution_plane.models.constants import EP_SCHEMA
 from execution_plane.models.credential import EncryptedCredential
+from execution_plane.models.execution_target_placement import ExecutionTargetPlacement, ExecutionTargetPlacementTypes
+from execution_plane.models.sqlmodel_types import DiscriminatedJSONB
 
 
 class BackendType(StrEnum):
@@ -66,7 +68,12 @@ class ExecutionTarget(SQLModel, table=True):
         ),
     )
     endpoint: str
-    namespace: str = "default"
+    placement: ExecutionTargetPlacementTypes = Field(
+        sa_type=DiscriminatedJSONB(ExecutionTargetPlacement),  # type: ignore[arg-type, call-overload]
+        sa_column_kwargs={"nullable": False},
+        discriminator="type",
+    )
+
     status: TargetStatus = Field(
         default=TargetStatus.REGISTERING,
         sa_column=Column(

@@ -21,7 +21,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:8eb2830d0936237fc
 
 USER 0
 
-RUN microdnf install --setopt=install_weak_deps=0 --nodocs -y python3.12 python3.12-pip \
+RUN microdnf install --setopt=install_weak_deps=0 --nodocs -y python3.12 python3.12-pip python3.12-cffi \
     && microdnf clean all
 
 RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
@@ -31,6 +31,8 @@ COPY LICENSE /licenses/LICENSE
 COPY --from=builder /opt/app-root/src/alembic.ini ./alembic.ini
 COPY --from=builder /opt/app-root/src/src/execution_plane/migrations ./src/execution_plane/migrations
 COPY --from=builder /opt/app-root/src/.venv /opt/app-root/src/.venv
+COPY --from=builder /opt/app-root/src/alembic.ini /opt/app-root/src/alembic.ini
+COPY --from=builder /opt/app-root/src/src /opt/app-root/src/src
 
 ENV PATH="/opt/app-root/src/.venv/bin:/opt/app-root/bin:$PATH" \
     PYTHONUNBUFFERED=1 \

@@ -20,10 +20,13 @@ uv run ruff format --check src tests
 uv run mypy --strict src
 ```
 
-For a separate local EP database, copy `compose.yaml` settings into a local `.env`
-or provide them through the shell. The standalone compose setup creates a local
-PostgreSQL server, an EP-owned database, and separate migration/runtime roles. It
-requires AO's verification key, issuer, and EP credential encryption key.
+For a separate local EP database, copy `.env.example` to `.env` if you need to
+override defaults. Generate local secrets and TLS material first (`make setup`,
+or `./tools/generate_secrets.sh` and `uv run python tools/generate_certs.py`).
+If a sibling Syntara checkout already has `backend/.secrets/jwt-primary.pub`,
+the secrets script copies it so EP can verify tokens issued by local AO.
+The standalone compose setup creates a local PostgreSQL server, an EP-owned
+database, and separate migration/runtime roles.
 Local work execution still requires a reachable Kubernetes/OpenShift target and
 an image tag available to that cluster; there is no in-process script fallback.
 
@@ -69,15 +72,16 @@ podman build -f Containerfile -t localhost/execution-plane:dev .
 ```
 
 The independent local compose stack is started from this repository with
-`podman-compose -f compose.yaml up --build`. AO chooses the script node image
-and sends a versioned invocation in the work-item payload. The worker wraps one
-cold-start Pod in a single-attempt Kubernetes Job, then sends invocation,
-progress, stdout/stderr result fields, errors, and final output over the SDK's
-gRPC protocol through an authenticated Kubernetes port-forward. It does not
-create a workload input Secret or read Pod logs. The Job is a backend resource;
-the WorkItem and its attempt state remain EP-owned and do not have a Pod
-lifecycle contract. Worker replicas are set to one for this initial serial
-release; claim fencing still protects database state from stale controllers.
+`make setup && uvx podman-compose up --build`. The worker submits each script as a
+short-lived Kubernetes Job in the selected execution target. Configure
+`EP_WORKLOAD_RUNNER_IMAGE` to an image available to that target cluster and grant
+the stored target credential permission to create/read Secrets, Jobs, Pods, Pod
+logs, and NetworkPolicies in the configured namespace. `EP_WORKLOAD_ALLOWED_EGRESS_CIDRS`
+is an operator-reviewed JSON list of destinations the workload may reach; without
+it, workloads can resolve DNS but have no general egress. If a whole IP family is
+allowed, also set `EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS` to the AO, Temporal,
+Execution Plane, and database address ranges that must remain unreachable.
+Per-integration Kubernetes API trust roots are stored encrypted in EP.
 
 The target-cluster service account needs `create/get/delete` on Jobs, `list` on
 Pods, `get` on `pods/portforward`, and `create/get/list/patch/delete` on

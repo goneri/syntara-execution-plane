@@ -9,3 +9,5 @@ dist/
 *.egg-info/
 coverage.xml
 htmlcov/
+.env
+.secrets/

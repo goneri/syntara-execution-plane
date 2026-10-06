@@ -33,6 +33,7 @@ DEFAULT_LANGUAGE = "python"
 DEFAULT_PYTHON = "print('hello from execution-plane')"
 DEFAULT_BASH = "echo hello from execution-plane"
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_IMAGE = os.environ.get("EP_NODE_IMAGE", "quay.io/ahetheri/syntara-node-script:migration-test")
 EP_CA_PATH = PROJECT_ROOT / ".secrets" / "certs" / "ca.pem"
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
@@ -105,28 +106,31 @@ def parse_env_pairs(values: list[str] | None) -> dict[str, str]:
     return environment
 
 
-def build_payload(*, language: str, code: str, timeout_seconds: int, environment: dict[str, str]) -> dict[str, Any]:
-    """Build the script workload payload accepted by the Kubernetes runner."""
-    input_config: dict[str, Any] = {
-        "language": language,
-        "code": code,
-        "_engine_timeout_seconds": timeout_seconds,
-    }
+def build_payload(
+    *,
+    language: str,
+    code: str,
+    timeout_seconds: int,
+    environment: dict[str, str],
+    image: str = DEFAULT_IMAGE,
+) -> dict[str, Any]:
+    """Build the versioned node invocation the Kubernetes runner dispatches."""
+    inputs: dict[str, Any] = {"language": language, "code": code}
     if environment:
-        input_config["environment"] = environment
+        inputs["environment"] = environment
     return {
-        "input_config": input_config,
         "invocation": {
             "version": 1,
             "operation": "execute",
-            "credentials": {},
+            "inputs": inputs,
+            "credentials": {"resolved": {}},
             "workflow_context": {},
             "settings": {},
+            "timeout_seconds": timeout_seconds,
             "max_output_bytes": 10**4,
-            "timeout_seconds": 15,
-            "inputs": {},
         },
-        "image": "aa",
+        "image": image,
+        "output_config": {"stdout": "stdout", "stderr": "stderr", "exit_code": "exit_code"},
     }
 
 
@@ -226,6 +230,11 @@ def main() -> int:
     parser.add_argument("--code-file", type=Path, help="Read script source from a file")
     parser.add_argument("--env", action="append", dest="env_pairs", help="Repeatable KEY=VALUE for the script env")
     parser.add_argument("--timeout-seconds", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument(
+        "--image",
+        default=DEFAULT_IMAGE,
+        help="Node image the execution target can pull (or set EP_NODE_IMAGE)",
+    )
     parser.add_argument("--payload-file", type=Path, help="Replace the generated payload with a JSON object")
     parser.add_argument("--wait", action="store_true", help="Poll until the work item is terminal")
     parser.add_argument(
@@ -247,6 +256,7 @@ def main() -> int:
                 code=resolve_code(args.language, args.code, args.code_file),
                 timeout_seconds=args.timeout_seconds,
                 environment=parse_env_pairs(args.env_pairs),
+                image=args.image,
             )
         print(f"[INFO] Submitting request_id={request_id} project_id={args.project_id}")
         token = ep_service_token(args.project_id)

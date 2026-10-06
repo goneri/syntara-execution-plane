@@ -1,0 +1,104 @@
+name: Integration
+
+on:
+  pull_request:
+  push:
+    branches: [devel]
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KIND_EXPERIMENTAL_PROVIDER: podman
+  EP_LIVE_STACK: "1"
+  EP_NODE_IMAGE: quay.io/ahetheri/syntara-node-script:migration-test
+
+jobs:
+  compose-kind:
+    name: Compose, Kind, and integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo apt-get clean
+          sudo sysctl -w fs.inotify.max_user_watches=524288
+          sudo sysctl -w fs.inotify.max_user_instances=1024
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: azure/setup-kubectl@v4
+
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - name: Generate secrets, certs, and install Python deps
+        run: make setup
+
+      - name: Start Execution Plane with podman-compose
+        timeout-minutes: 20
+        run: |
+          ulimit -n 65535
+          # --no-deps: start every service immediately. podman-compose attached
+          # health waits hang, and in-process scripts inside the containers
+          # already wait for Postgres, roles, and Alembic.
+          uvx podman-compose -f compose.yaml up --build -d --no-deps
+
+      - name: Wait for the API to become ready
+        timeout-minutes: 10
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS --cacert .secrets/certs/ca.pem https://127.0.0.1:8001/healthz/ready; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "API did not become ready"
+          uvx podman-compose -f compose.yaml logs
+          exit 1
+
+      - name: Register a kind execution target
+        timeout-minutes: 15
+        run: uv run python tools/deploy_kind_execution_target.py --wait-seconds 180
+
+      - name: Pre-pull the node image into kind
+        continue-on-error: true
+        run: |
+          node=$(kind get nodes --name ep-kind | head -n1)
+          podman exec "$node" crictl pull "$EP_NODE_IMAGE"
+
+      - name: Run integration tests against the deployment
+        timeout-minutes: 15
+        run: uv run pytest tests/integration/ -v --tb=short
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== compose logs ==="
+          uvx podman-compose -f compose.yaml logs || true
+          echo "=== kind pods ==="
+          kind export kubeconfig --name ep-kind || true
+          kubectl get pods -A || true
+          kubectl describe pods -n execution || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name ep-kind || true
+          uvx podman-compose -f compose.yaml down -v || true

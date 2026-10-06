@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Prepare the execution-plane namespace on the AO Kind cluster (Konflux / aap-dev).
 #
-# Applies execution-plane-init.yaml to the *current* cluster (same Kind that
-# hosts AO), mints a syntara-dispatcher token without printing it, checks that
-# the dispatcher Role can create pods only in this namespace, registers that
-# cluster as an ExecutionTarget, deploys the EP worker in execution-plane,
-# pre-pulls the public script-node image onto the Kind node (PR #747), enables
-# script dispatch on myao-worker, opens Temporal 7233 from this namespace
-# (operator NP otherwise drops it), and copies AO mTLS secrets so the EP
-# worker can complete the async activity.
+# Applies deploy/kubernetes/execution-target/rbac.yaml to the *current* cluster
+# (same Kind that hosts AO), mints a syntara-dispatcher token without printing
+# it, checks that the dispatcher Role can create Jobs (not Pods) only in this
+# namespace,
+# registers that cluster as an ExecutionTarget, deploys the EP worker in
+# execution-plane, pre-pulls the public script-node image onto the Kind node
+# (PR #747), enables script dispatch on myao-worker, opens Temporal 7233 from
+# this namespace (operator NP otherwise drops it), and copies AO mTLS secrets
+# so the EP worker can complete the async activity.
 # The hello-world demo belongs in konflux-run-hello-world-demo.sh.
 #
 # Intended to run on the mapt VM after deploy-ao, with KUBECONFIG pointing at
@@ -24,8 +25,17 @@ KUBECONFIG="${KUBECONFIG:-${HOME}/aap-dev/.tmp/27-next-ao-operator.kubeconfig}"
 export KUBECONFIG
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-TOOLS_DIR=$(cd "${SCRIPT_DIR}/../../execution-plane/tools" && pwd)
-INIT_YAML="${INIT_YAML:-${SCRIPT_DIR}/execution-plane-init.yaml}"
+REPO_ROOT=$(cd "${SCRIPT_DIR}/../.." && pwd)
+# Registration helpers live in the AO tree. deploy-ao clones syntara to
+# $HOME/syntara; honor TOOLS_DIR when the caller sets it (Konflux).
+if [[ -z "${TOOLS_DIR:-}" ]]; then
+  if [[ -d "${HOME}/syntara/backend/execution-plane/tools" ]]; then
+    TOOLS_DIR="${HOME}/syntara/backend/execution-plane/tools"
+  else
+    TOOLS_DIR=$(cd "${SCRIPT_DIR}/../../execution-plane/tools" && pwd)
+  fi
+fi
+INIT_YAML="${INIT_YAML:-${REPO_ROOT}/deploy/kubernetes/execution-target/rbac.yaml}"
 WORKER_YAML="${WORKER_YAML:-${SCRIPT_DIR}/execution-plane-worker.yaml}"
 NAMESPACE="${NAMESPACE:-execution-plane}"
 AO_NAMESPACE="${AO_NAMESPACE:-aap27-next}"
@@ -404,15 +414,27 @@ unset TOKEN
 
 DISPATCHER_AS="system:serviceaccount:${NAMESPACE}:${SA_NAME}"
 
-echo "=== RBAC: pods in ${NAMESPACE} (must be yes) ==="
-if ! kubectl auth can-i create pods --as="${DISPATCHER_AS}" -n "${NAMESPACE}"; then
-  echo "ERROR: ${SA_NAME} cannot create pods in ${NAMESPACE}" >&2
+echo "=== RBAC: jobs in ${NAMESPACE} (must be yes) ==="
+if ! kubectl auth can-i create jobs.batch --as="${DISPATCHER_AS}" -n "${NAMESPACE}"; then
+  echo "ERROR: ${SA_NAME} cannot create jobs in ${NAMESPACE}" >&2
   exit 1
 fi
 
-echo "=== RBAC: pods in ${AO_NAMESPACE} (must be no) ==="
-if kubectl auth can-i create pods --as="${DISPATCHER_AS}" -n "${AO_NAMESPACE}"; then
-  echo "ERROR: ${SA_NAME} can create pods in ${AO_NAMESPACE}; Role is too wide" >&2
+echo "=== RBAC: list pods in ${NAMESPACE} (must be yes) ==="
+if ! kubectl auth can-i list pods --as="${DISPATCHER_AS}" -n "${NAMESPACE}"; then
+  echo "ERROR: ${SA_NAME} cannot list pods in ${NAMESPACE}" >&2
+  exit 1
+fi
+
+echo "=== RBAC: create pods in ${NAMESPACE} (must be no) ==="
+if kubectl auth can-i create pods --as="${DISPATCHER_AS}" -n "${NAMESPACE}"; then
+  echo "ERROR: ${SA_NAME} can create pods in ${NAMESPACE}; Role is too wide" >&2
+  exit 1
+fi
+
+echo "=== RBAC: jobs in ${AO_NAMESPACE} (must be no) ==="
+if kubectl auth can-i create jobs.batch --as="${DISPATCHER_AS}" -n "${AO_NAMESPACE}"; then
+  echo "ERROR: ${SA_NAME} can create jobs in ${AO_NAMESPACE}; Role is too wide" >&2
   exit 1
 fi
 

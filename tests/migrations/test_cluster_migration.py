@@ -19,6 +19,18 @@ def test_cluster_migration_is_next_revision_and_defines_cluster_table() -> None:
     assert "clusters" in migration.upgrade.__doc__
 
 
+def test_placement_and_encrypted_payload_histories_merge_before_scope_normalization() -> None:
+    merge = importlib.import_module(
+        "execution_plane.migrations.versions.h4d5e6f7a8b9_merge_placement_and_payload_heads"
+    )
+    normalize = importlib.import_module(
+        "execution_plane.migrations.versions.i5e6f7a8b9c0_normalize_project_scope_nulls"
+    )
+
+    assert set(merge.down_revision) == {"e0f1a2b3c4d5", "g3c4d5e6f7a8"}
+    assert normalize.down_revision == merge.revision
+
+
 def test_execution_target_namespace_migration_follows_cluster_migration() -> None:
     """The namespace column is added after Cluster ownership exists."""
     migration = importlib.import_module(

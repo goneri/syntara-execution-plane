@@ -81,7 +81,9 @@ class ClusterStore(StoreBase):
         """Return a Cluster, redacting its API credential unless execution needs it."""
         async with self._session_context() as session:
             cluster = await session.get(Cluster, cluster_id)
-            return None if cluster is None or include_secret else self._without_secret(cluster)
+            if cluster is None or include_secret:
+                return cluster
+            return self._without_secret(cluster)
 
     async def get_by_name(self, name: str) -> Cluster | None:
         """Return a Cluster by name without its API credential."""

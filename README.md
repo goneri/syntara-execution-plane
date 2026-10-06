@@ -80,8 +80,9 @@ lifecycle contract. Worker replicas are set to one for this initial serial
 release; claim fencing still protects database state from stale controllers.
 
 The target-cluster service account needs `create/get/delete` on Jobs, `list` on
-Pods, `create` on `pods/portforward`, and `create/get/list/patch/delete` on
-NetworkPolicies. It does not need workload Secret or Pod-log permissions.
+Pods, `get` on `pods/portforward`, and `create/get/list/patch/delete` on
+NetworkPolicies. It does not need workload Secret, Pod-log, or Pod-exec
+permissions.
 `EP_WORKLOAD_ALLOWED_EGRESS_CIDRS` is an operator-reviewed JSON list of
 destinations the workload may reach; without it, workloads can resolve DNS but
 have no general egress. If a whole IP family is allowed, also set

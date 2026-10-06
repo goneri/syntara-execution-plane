@@ -28,6 +28,8 @@ RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
 
 WORKDIR /opt/app-root/src
 COPY LICENSE /licenses/LICENSE
+COPY --from=builder /opt/app-root/src/alembic.ini ./alembic.ini
+COPY --from=builder /opt/app-root/src/src/execution_plane/migrations ./src/execution_plane/migrations
 COPY --from=builder /opt/app-root/src/.venv /opt/app-root/src/.venv
 
 ENV PATH="/opt/app-root/src/.venv/bin:/opt/app-root/bin:$PATH" \

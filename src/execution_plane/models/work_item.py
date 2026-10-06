@@ -7,6 +7,7 @@ from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import Column, String
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.types import DateTime
 from sqlmodel import Field, SQLModel
@@ -57,7 +58,14 @@ class WorkItem(SQLModel, table=True):
 
     status: WorkItemStatus = Field(
         default=WorkItemStatus.PENDING,
-        sa_column=Column(sa.String, nullable=False),
+        sa_column=Column(
+            SAEnum(
+                WorkItemStatus,
+                native_enum=False,
+                values_callable=lambda members: [member.value for member in members],
+            ),
+            nullable=False,
+        ),
     )
 
     # Set when a worker claims this item.

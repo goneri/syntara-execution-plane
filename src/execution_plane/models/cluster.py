@@ -13,6 +13,7 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from execution_plane.models.constants import EP_SCHEMA
 from execution_plane.models.credential import EncryptedCredential
+from execution_plane.models.sqlmodel_types import UUIDListJSONB
 
 if TYPE_CHECKING:
     type ExecutionTarget = Any
@@ -69,7 +70,7 @@ class Cluster(SQLModel, table=True):
     source_revision: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
     project_ids: list[uuid.UUID] | None = Field(
         default=None,
-        sa_column=Column(JSONB, nullable=True),
+        sa_column=Column(UUIDListJSONB(), nullable=True),
         description="Null permits all projects; a list limits placement and target visibility.",
     )
     cluster_type: ClusterType = Field(

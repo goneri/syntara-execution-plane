@@ -21,7 +21,7 @@ rules:
     verbs: ["list"]
   - apiGroups: [""]
     resources: ["pods/portforward"]
-    verbs: ["create"]
+    verbs: ["get"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "delete"]

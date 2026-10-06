@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
@@ -11,6 +12,44 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Dialect
+    from sqlalchemy.types import TypeEngine
+
+
+class UUIDListJSONB(TypeDecorator):  # type: ignore[type-arg]
+    """Store UUID lists as JSON strings and restore UUID objects on reads."""
+
+    impl = JSONB
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        """Use SQL NULL for Python ``None`` instead of JSON ``null``."""
+        return dialect.type_descriptor(JSONB(none_as_null=True))
+
+    def process_bind_param(self, value: object, _dialect: Dialect) -> list[str] | None:
+        """Convert UUID objects or strings to JSON-compatible UUID strings."""
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            error_message = "Project IDs must be a list of UUIDs or None"
+            raise TypeError(error_message)
+        try:
+            return [str(uuid.UUID(str(item))) for item in value]
+        except (AttributeError, TypeError, ValueError) as error:
+            error_message = "Project IDs must contain only valid UUIDs"
+            raise ValueError(error_message) from error
+
+    def process_result_value(self, value: object, _dialect: Dialect) -> list[uuid.UUID] | None:
+        """Restore JSON UUID strings to UUID objects; normalize JSON null."""
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            error_message = "Stored project IDs must be a JSON array or null"
+            raise TypeError(error_message)
+        try:
+            return [uuid.UUID(str(item)) for item in value]
+        except (AttributeError, TypeError, ValueError) as error:
+            error_message = "Stored project IDs contain an invalid UUID"
+            raise ValueError(error_message) from error
 
 
 class DiscriminatedJSONB(TypeDecorator):  # type: ignore[type-arg]

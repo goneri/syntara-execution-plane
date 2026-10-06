@@ -9,6 +9,7 @@ from sqlmodel import Field, SQLModel
 
 from execution_plane.models.constants import EP_SCHEMA
 from execution_plane.models.credential import EncryptedCredential
+from execution_plane.models.sqlmodel_types import UUIDListJSONB
 
 
 class ClusterBinding(SQLModel, table=True):
@@ -30,7 +31,7 @@ class ClusterBinding(SQLModel, table=True):
         repr=False,
         exclude=True,
     )
-    project_ids: list[uuid.UUID] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
+    project_ids: list[uuid.UUID] | None = Field(default=None, sa_column=Column(UUIDListJSONB(), nullable=True))
     labels: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False))
     enabled: bool = True
     cluster_id: uuid.UUID | None = Field(default=None)

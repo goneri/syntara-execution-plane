@@ -30,6 +30,17 @@ logger = structlog.stdlib.get_logger(__name__)
 
 MAX_FRAME_BYTES = MAX_MESSAGE_BYTES
 
+
+def _network_contains(
+    parent: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    child: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    """Return whether a same-family parent CIDR contains a child CIDR."""
+    if isinstance(parent, ipaddress.IPv4Network):
+        return isinstance(child, ipaddress.IPv4Network) and child.subnet_of(parent)
+    return isinstance(child, ipaddress.IPv6Network) and child.subnet_of(parent)
+
+
 # Cap how much of a Kubernetes error body we write to the admin log. The API
 # server's failure body is a small Status object, but a misbehaving proxy can
 # return an arbitrarily large page — truncate so one bad response can't flood
@@ -188,21 +199,29 @@ def network_policy_body(
     ]
     for value in allowed_egress_cidrs:
         network = ipaddress.ip_network(value, strict=False)
-        if isinstance(network, ipaddress.IPv4Network):
-            exclusions = [
-                str(candidate)
-                for candidate in denied
-                if isinstance(candidate, ipaddress.IPv4Network) and candidate.subnet_of(network)
-            ]
-        else:
-            exclusions = [
-                str(candidate)
-                for candidate in denied
-                if isinstance(candidate, ipaddress.IPv6Network) and candidate.subnet_of(network)
-            ]
+        exclusions: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+        fully_denied = False
+        for candidate in denied:
+            if not (_network_contains(network, candidate) or _network_contains(candidate, network)):
+                continue
+            if _network_contains(candidate, network):
+                fully_denied = True
+                break
+            if _network_contains(network, candidate):
+                exclusions.append(candidate)
+        if fully_denied:
+            continue
+
+        # NetworkPolicy IPBlock exclusions must be contained by the allowed
+        # CIDR. Keep only the broadest exclusions when configured ranges nest.
+        exclusions = [
+            candidate
+            for candidate in exclusions
+            if not any(candidate != other and _network_contains(other, candidate) for other in exclusions)
+        ]
         ip_block: dict[str, Any] = {"cidr": str(network)}
         if exclusions:
-            ip_block["except"] = exclusions
+            ip_block["except"] = [str(candidate) for candidate in exclusions]
         egress.append({"to": [{"ipBlock": ip_block}]})
     return {
         "apiVersion": "networking.k8s.io/v1",

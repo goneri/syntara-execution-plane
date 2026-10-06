@@ -48,6 +48,37 @@ def test_network_policy_allows_dns_and_excludes_forbidden_workload_ranges() -> N
     assert egress[1]["to"][0]["ipBlock"]["except"] == ["10.20.0.0/16"]
 
 
+@pytest.mark.parametrize(
+    ("allowed", "forbidden", "expected_allowed"),
+    [
+        (["10.0.0.0/8"], ["10.0.0.0/8"], []),
+        (["10.0.0.0/16"], ["10.0.0.0/8"], []),
+        (["10.0.0.0/8"], ["10.20.0.0/16", "10.20.1.0/24"], ["10.0.0.0/8"]),
+        (["2001:db8::/32"], ["2001:db8::/24"], []),
+        (["2001:db8::/32"], ["2001:db8:1::/48"], ["2001:db8::/32"]),
+    ],
+)
+def test_network_policy_forbidden_network_overlaps_never_reopen_denied_addresses(
+    allowed: list[str], forbidden: list[str], expected_allowed: list[str]
+) -> None:
+    policy = network_policy_body("work-item", "attempt", "worker", allowed, forbidden)
+    destinations = policy["spec"]["egress"][1:]
+
+    assert [rule["to"][0]["ipBlock"]["cidr"] for rule in destinations] == expected_allowed
+
+
+def test_network_policy_removes_nested_redundant_exclusions() -> None:
+    policy = network_policy_body(
+        "work-item",
+        "attempt",
+        "worker",
+        ["10.0.0.0/8"],
+        ["10.20.0.0/16", "10.20.1.0/24"],
+    )
+
+    assert policy["spec"]["egress"][1]["to"][0]["ipBlock"]["except"] == ["10.20.0.0/16"]
+
+
 def test_node_result_preserves_partial_output_on_failure() -> None:
     frame = {
         "result": {

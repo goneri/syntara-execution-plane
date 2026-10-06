@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import ssl
 from typing import TYPE_CHECKING
 
 import httpx
@@ -31,14 +32,15 @@ class CompletionEventDelivery:
         self._url = settings.completion_callback_url
         self._client: httpx.AsyncClient | None = None
         if self._url:
-            cert = None
+            ssl_context = ssl.create_default_context(cafile=settings.completion_callback_ca_cert_path)
             if settings.completion_callback_cert_path and settings.completion_callback_key_path:
-                cert = (settings.completion_callback_cert_path, settings.completion_callback_key_path)
-            verify: bool | str = settings.completion_callback_ca_cert_path or True
+                ssl_context.load_cert_chain(
+                    settings.completion_callback_cert_path,
+                    settings.completion_callback_key_path,
+                )
             self._client = httpx.AsyncClient(
                 timeout=settings.completion_callback_timeout_seconds,
-                verify=verify,
-                cert=cert,
+                verify=ssl_context,
             )
 
     async def close(self) -> None:

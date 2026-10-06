@@ -83,6 +83,31 @@ worker, then running:
 uv run pytest tests/integration/test_postgres_persistence_types.py -q
 ```
 
+### HTTP executor smoke test
+
+On 6 October 2026, the HTTP executor image was submitted to the standalone EP API
+and dispatched by the EP worker as a cold-start Kubernetes Job. The workload used
+the SDK gRPC protocol to call a controlled HTTP service in its execution namespace.
+EP returned HTTP status `200` and the expected response marker, persisted the
+WorkItem as `completed`, and reported resource cleanup as `complete`.
+
+The run used EP commit `88af810` (`sha256:1c8f61aef4c0350b2493ca2183bd1dc60d1e5176086ba16438001f8792b54bc7`)
+and the HTTP executor built from `syntara-step-types` commit `0909750`
+(`sha256:7d1bbac751931974df19ec337008cbb9f1d830fde0d8e082a196862ef4b67aea`).
+The target was a uniquely named namespace in K3d Kubernetes `v1.31.5+k3s1`
+(`linux/arm64`), using Flannel. The test created and then removed the namespace;
+the EP database and Compose project were isolated and removed afterward.
+
+This was a direct EP WorkItem submission using the first-release API contract,
+which currently accepts `workload_type: "script"`; the submitted image was the
+HTTP executor. It validates EP's generic Job/gRPC execution path for that image.
+It did not run AO's native `http_request` Temporal activity, exercise AO's
+workflow-to-EP dispatch or completion callback, or test another EP workload type.
+The pod's NetworkPolicy was created with the Job, but Flannel does not enforce
+NetworkPolicies, so this run is not evidence for either allowed-versus-blocked
+egress enforcement or the deny-egress case. Repeat those checks on Calico or an
+enforcing OpenShift CNI.
+
 ## NetworkPolicy enforcement status
 
 The smoke Kind cluster currently uses kindnet. It can confirm the Job and

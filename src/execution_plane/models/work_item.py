@@ -12,6 +12,7 @@ from sqlalchemy.types import DateTime
 from sqlmodel import Field, SQLModel
 
 from execution_plane.models.constants import EP_SCHEMA
+from execution_plane.models.encrypted_payload import EncryptedWorkItemPayload
 
 
 class WorkItemStatus(StrEnum):
@@ -63,11 +64,20 @@ class WorkItem(SQLModel, table=True):
     execution_target_id: uuid.UUID | None = Field(default=None, foreign_key=f"{EP_SCHEMA}.execution_targets.id")
 
     # Workload parameters serialized at submission time.
-    payload: dict[str, Any] = Field(default={}, sa_column=Column(JSONB, nullable=False, server_default="{}"))
+    payload: dict[str, Any] = Field(
+        default={},
+        sa_column=Column(EncryptedWorkItemPayload(), nullable=False, server_default="{}"),
+    )
 
     # Terminal result is owned and retained by EP independently of AO availability.
     result: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB, nullable=True))
 
     created_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
     claimed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))
+    claim_owner_id: uuid.UUID | None = Field(default=None, nullable=True)
+    claim_generation: int = Field(default=0, nullable=False)
+    backend_resource_name: str | None = Field(default=None, sa_column=Column(String(253), nullable=True))
+    backend_resource_uid: str | None = Field(default=None, sa_column=Column(String(64), nullable=True))
+    resource_cleanup_status: str = Field(default="not_required", sa_column=Column(String(32), nullable=False))
+    resource_cleanup_error: str | None = Field(default=None, sa_column=Column(String(1000), nullable=True))
     completed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), nullable=True))

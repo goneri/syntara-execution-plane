@@ -24,9 +24,39 @@ class WorkItemSubmit(BaseModel):
     @field_validator("payload")
     @classmethod
     def limit_payload_size(cls, payload: dict[str, Any]) -> dict[str, Any]:
-        """Keep the job-scoped Kubernetes Secret below the platform size limit."""
+        """Keep the encoded node request below the HTTP and gRPC framing budgets."""
         if len(json.dumps(payload, separators=(",", ":"), default=str).encode("utf-8")) > 512 * 1024:
             msg = "workload payload exceeds the 512 KiB limit"
+            raise ValueError(msg)
+        return payload
+
+    @field_validator("payload")
+    @classmethod
+    def validate_node_invocation(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Accept only the versioned script invocation contract used by node gRPC."""
+        invocation = payload.get("invocation")
+        image = payload.get("image")
+        output_config = payload.get("output_config")
+        if not isinstance(invocation, dict) or not isinstance(image, str) or not image:
+            msg = "payload must include a versioned invocation and node image"
+            raise ValueError(msg)
+        if invocation.get("version") != 1 or invocation.get("operation") != "execute":
+            msg = "unsupported node invocation version or operation"
+            raise ValueError(msg)
+        for key in ("inputs", "credentials", "workflow_context", "settings"):
+            if not isinstance(invocation.get(key), dict):
+                msg = f"invocation.{key} must be an object"
+                raise TypeError(msg)
+        timeout = invocation.get("timeout_seconds")
+        output_limit = invocation.get("max_output_bytes")
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            msg = "invocation.timeout_seconds must be a positive integer"
+            raise ValueError(msg)
+        if isinstance(output_limit, bool) or not isinstance(output_limit, int) or output_limit < 1:
+            msg = "invocation.max_output_bytes must be a positive integer"
+            raise ValueError(msg)
+        if output_config is not None and not isinstance(output_config, dict):
+            msg = "payload.output_config must be an object or null"
             raise ValueError(msg)
         return payload
 
@@ -90,6 +120,8 @@ class WorkItemRead(BaseModel):
     created_at: datetime
     claimed_at: datetime | None
     completed_at: datetime | None
+    resource_cleanup_status: str
+    resource_cleanup_error: str | None
     completion_event_id: uuid.UUID | None = None
     state_revision: int | None = None
 

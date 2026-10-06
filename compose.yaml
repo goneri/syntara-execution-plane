@@ -42,6 +42,7 @@ services:
     command: [alembic, -c, alembic.ini, upgrade, head]
     environment:
       DATABASE_URL: postgresql+asyncpg://execution_plane_migrator:${EP_DB_MIGRATOR_PASSWORD:-ep-migrator}@database:5432/execution_plane
+      EP_CREDENTIAL_ENCRYPTION_KEY: ${EP_CREDENTIAL_ENCRYPTION_KEY:?Set a base64url-encoded 32-byte EP key}
     depends_on:
       database-init:
         condition: service_completed_successfully
@@ -86,7 +87,8 @@ services:
       EP_DATABASE_URL: postgresql+asyncpg://execution_plane_runtime:${EP_DB_RUNTIME_PASSWORD:-ep-runtime}@database:5432/execution_plane
       EP_CREDENTIAL_ENCRYPTION_KEY: ${EP_CREDENTIAL_ENCRYPTION_KEY:?Set a base64url-encoded 32-byte EP key}
       EP_COMPLETION_CALLBACK_URL: ${EP_COMPLETION_CALLBACK_URL:-}
-      EP_WORKLOAD_RUNNER_IMAGE: ${EP_WORKLOAD_RUNNER_IMAGE:-}
+      EP_NODE_STARTUP_SECONDS: ${EP_NODE_STARTUP_SECONDS:-120}
+      EP_NODE_GRACE_SECONDS: ${EP_NODE_GRACE_SECONDS:-30}
       EP_WORKLOAD_ALLOWED_EGRESS_CIDRS: ${EP_WORKLOAD_ALLOWED_EGRESS_CIDRS:-[]}
       EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS: ${EP_WORKLOAD_FORBIDDEN_EGRESS_CIDRS:-[]}
     depends_on:

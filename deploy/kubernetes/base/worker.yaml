@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/name: execution-plane
     app.kubernetes.io/component: worker
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: execution-plane
@@ -41,11 +41,18 @@ spec:
               value: /run/secrets/ao-callback/tls.crt
             - name: EP_CALLBACK_KEY_PATH
               value: /run/secrets/ao-callback/tls.key
-            - name: EP_WORKLOAD_RUNNER_IMAGE
+            - name: EP_NODE_STARTUP_SECONDS
               valueFrom:
                 configMapKeyRef:
                   name: execution-plane-config
-                  key: workload-runner-image
+                  key: node-startup-seconds
+                  optional: true
+            - name: EP_NODE_GRACE_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: execution-plane-config
+                  key: node-grace-seconds
+                  optional: true
             - name: EP_WORKLOAD_ALLOWED_EGRESS_CIDRS
               valueFrom:
                 configMapKeyRef:

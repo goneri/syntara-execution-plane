@@ -11,3 +11,7 @@ class StoreConfigurationError(ValueError):
 
 class StoreSessionError(RuntimeError):
     """Raised when a store has no usable session source."""
+
+
+class StaleClaimError(RuntimeError):
+    """Raised when a worker attempts to mutate a claim owned by another generation."""

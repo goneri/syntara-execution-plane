@@ -63,6 +63,12 @@ class _ScalarResult:
     def scalar_one_or_none(self) -> uuid.UUID | None:
         return self.value
 
+    def scalars(self) -> Self:
+        return self
+
+    def first(self) -> uuid.UUID | None:
+        return self.value
+
 
 class _ClaimResult:
     def __init__(self, item: WorkItem | None) -> None:
@@ -70,6 +76,9 @@ class _ClaimResult:
 
     def scalars(self) -> Self:
         return self
+
+    def all(self) -> list[WorkItem]:
+        return [self.item] if self.item is not None else []
 
     def first(self) -> WorkItem | None:
         return self.item
@@ -162,7 +171,7 @@ async def test_claim_one_assigns_an_eligible_target_in_the_claim_transaction() -
     )
     target_id = uuid.uuid4()
     session = _Session()
-    session.execute.side_effect = [_ClaimResult(item), _ScalarResult(target_id)]
+    session.execute.side_effect = [_ClaimResult(None), _ClaimResult(item), _ScalarResult(target_id)]
     store._session_factory = _SessionFactory(session)  # type: ignore[assignment]
 
     claimed = await store.claim_one()
@@ -171,10 +180,47 @@ async def test_claim_one_assigns_an_eligible_target_in_the_claim_transaction() -
     assert claimed.execution_target_id == target_id
     assert claimed.status is WorkItemStatus.CLAIMED
     assert claimed.claimed_at is not None
-    assert session.commits == 1
-    target_statement = session.execute.await_args_list[1].args[0]
+    assert session.commits == 2
+    target_statement = session.execute.await_args_list[2].args[0]
     assert target_statement._for_update_arg is not None
     assert target_statement._for_update_arg.skip_locked is True
+    await store.close()
+
+
+@pytest.mark.asyncio
+async def test_uncertain_dispatch_records_reconciliation_callback() -> None:
+    """An unknown node result remains visible and reaches AO through the outbox."""
+    owner_id = uuid.uuid4()
+    item = WorkItem(
+        id=uuid.uuid4(),
+        client_id="test-client",
+        project_id=uuid.uuid4(),
+        request_id="request-uncertain",
+        request_hash="request-hash",
+        work_correlation_id=uuid.uuid4(),
+        status=WorkItemStatus.DISPATCHED,
+        claim_owner_id=owner_id,
+        claim_generation=3,
+        created_at=datetime.now(UTC),
+    )
+    session = _Session(item)
+    store = _store()
+    store._session_factory = _SessionFactory(session)  # type: ignore[assignment]
+
+    await store.mark_reconciliation_required(
+        item.id,
+        "gRPC outcome was uncertain",
+        claim_owner_id=owner_id,
+        claim_generation=3,
+    )
+
+    assert item.status is WorkItemStatus.RECONCILIATION_REQUIRED
+    assert item.completed_at is not None
+    assert item.result["error_type"] == "WorkloadOutcomeUnknownError"
+    assert session.added is not None
+    assert session.added.status == WorkItemStatus.RECONCILIATION_REQUIRED.value
+    assert session.added.result == item.result
+    assert session.commits == 1
     await store.close()
 
 

@@ -561,7 +561,7 @@ Implementation lives in the execution-plane package so it can run without
 Syntara `BaseService` (this is not an HTTP domain service).
 
 ```
-src/execution_plane/execution_target_reconciler/
+backend/execution-plane/src/execution_plane/execution_target_reconciler/
   types.py          # WorkRequirements, ClusterSnapshot, ExecutionTargetSnapshot, ReconcileResult, ...
   protocols.py      # ClusterRegistry, ExecutionTargetRegistry, EligibilityFilter
   exceptions.py
@@ -570,7 +570,7 @@ src/execution_plane/execution_target_reconciler/
   reconciler.py
   placement.py      # PlacementResolver + WorkerManagerRegistry
   adapters.py       # implicit single-Cluster adapter until AAP-92716
-tests/execution_target_reconciler/
+backend/execution-plane/tests/execution_target_reconciler/
 ```
 
 Tests must mirror the source domain

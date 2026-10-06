@@ -19,31 +19,17 @@ def to_asyncpg_url(database_url: str) -> str:
     return make_url(database_url).set(drivername="postgresql").render_as_string(hide_password=False)
 
 
-class ScriptExecutorSettings(BaseSettings):
-    """Script execution settings — no database connection required.
-
-    Used directly by script_executor.py so it can be imported and tested
-    without a database URL in the environment.
-    """
+class EPSettings(BaseSettings):
+    """Settings for the standalone Execution Plane service and worker."""
 
     model_config = SettingsConfigDict(extra="ignore")
-
-    # Process cleanup timing
-    script_cleanup_terminate_timeout: float = 1.0
-    script_cleanup_kill_timeout: float = 0.5
-
-    # Per-env-var size cap (bytes)
-    max_env_var_length: int = 32768  # 32 KB
-
-    max_completion_result_bytes: int = Field(default=1_887_436, validation_alias="EP_MAX_COMPLETION_RESULT_BYTES")
-
-
-class EPSettings(ScriptExecutorSettings):
-    """Full settings for the execution-plane worker, including database."""
 
     # Runtime configuration accepts only the EP-owned database variable. Alembic
     # has a separate DATABASE_URL input for the one-off migration job.
     database_url: str = Field(validation_alias="EP_DATABASE_URL")
+
+    node_startup_seconds: int = Field(default=120, validation_alias="EP_NODE_STARTUP_SECONDS", ge=1)
+    node_grace_seconds: int = Field(default=30, validation_alias="EP_NODE_GRACE_SECONDS", ge=1)
 
     ao_jwt_public_key_path: str | None = Field(
         default=None,
@@ -68,17 +54,12 @@ class EPSettings(ScriptExecutorSettings):
         default=None,
         validation_alias="EP_CREDENTIAL_ENCRYPTION_KEY_PATH",
     )
+    dispatch_retry_backoff_seconds: float = Field(default=5.0, validation_alias="EP_DISPATCH_RETRY_BACKOFF_SECONDS")
     completion_callback_url: str | None = Field(default=None, validation_alias="EP_COMPLETION_CALLBACK_URL")
     completion_callback_ca_cert_path: str | None = Field(default=None, validation_alias="EP_CALLBACK_CA_CERT_PATH")
     completion_callback_cert_path: str | None = Field(default=None, validation_alias="EP_CALLBACK_CERT_PATH")
     completion_callback_key_path: str | None = Field(default=None, validation_alias="EP_CALLBACK_KEY_PATH")
     completion_callback_timeout_seconds: float = Field(default=10.0, validation_alias="EP_CALLBACK_TIMEOUT_SECONDS")
-    workload_runner_image: str | None = Field(default=None, validation_alias="EP_WORKLOAD_RUNNER_IMAGE")
-    workload_runner_cpu_request: str = Field(default="100m", validation_alias="EP_WORKLOAD_CPU_REQUEST")
-    workload_runner_memory_request: str = Field(default="128Mi", validation_alias="EP_WORKLOAD_MEMORY_REQUEST")
-    workload_runner_cpu_limit: str = Field(default="1", validation_alias="EP_WORKLOAD_CPU_LIMIT")
-    workload_runner_memory_limit: str = Field(default="512Mi", validation_alias="EP_WORKLOAD_MEMORY_LIMIT")
-    workload_cluster_ca_bundle_path: str | None = Field(default=None, validation_alias="EP_CLUSTER_CA_BUNDLE_PATH")
     workload_allowed_egress_cidrs: list[str] = Field(
         default_factory=list,
         validation_alias="EP_WORKLOAD_ALLOWED_EGRESS_CIDRS",
@@ -134,12 +115,6 @@ class EPSettings(ScriptExecutorSettings):
     def database_url_asyncpg(self) -> str:
         """asyncpg-compatible URL (strips the +asyncpg SQLAlchemy driver prefix)."""
         return to_asyncpg_url(self.database_url)
-
-
-@lru_cache
-def get_script_executor_settings() -> ScriptExecutorSettings:
-    """Load and cache script executor settings from the environment."""
-    return ScriptExecutorSettings()
 
 
 @lru_cache

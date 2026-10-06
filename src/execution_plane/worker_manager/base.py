@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 
 class WorkerManager(Protocol):
-    """Claims a worker, dispatches a work item, streams stdout, and returns the result."""
+    """Obtains a backend worker, dispatches one logical work item, and returns its result."""
 
     async def dispatch(self, work_item: WorkItem) -> dict[str, Any]:
-        """Dispatch work_item to an available worker and return the terminal result."""
+        """Dispatch through the selected backend; application data moves over its node protocol."""
         ...

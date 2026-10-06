@@ -1,15 +1,25 @@
-# Open Syntara PRs carried into the migration
+# ANSTRAT-1803 branch additions and migration status
 
-The migration branch is based on the merged `feat/ANSTRAT-1803` branch snapshot. These PRs are not included in that snapshot and have not been recreated or closed. Their original Syntara PRs remain the source of truth until follow-up work is split across the two repositories.
+This map tracks the work added to `feat/ANSTRAT-1803` after the initial service
+split and how it is represented by the two migration PRs. The source PRs remain
+in Syntara for history; this document records the new repository ownership and
+the places where the old monorepo assumptions were intentionally replaced.
 
-| Original PR | Planned follow-up |
-| --- | --- |
-| [#725 — target metadata and platform mapping](https://github.com/syntara-orchestration/syntara/pull/725) | EP models, registries, placement and migrations here; Syntara integration/schema/contracts in Syntara. |
-| [#723 — Kubernetes worker manager](https://github.com/syntara-orchestration/syntara/pull/723) | EP worker manager/protocol here; Syntara dispatch, configuration and compose in Syntara. |
-| [#701 — SDK node containers](https://github.com/syntara-orchestration/syntara/pull/701) | Decide node/protocol ownership with #723 before splitting images, runtime and Syntara workflow routing. |
-| [#727 — Kubernetes Resource Monitor design](https://github.com/syntara-orchestration/syntara/pull/727) | Newly surfaced after the initial inventory. Reconcile its Execution Plane resource-monitor design docs here during the deferred PR follow-up; the original Syntara PR remains untouched. |
-| [#673 — workload data sharing](https://github.com/syntara-orchestration/syntara/pull/673) | Reconcile and move EP documentation here. |
-| [#632 — cluster/target/scheduler design](https://github.com/syntara-orchestration/syntara/pull/632) | Reconcile against merged docs and move remaining EP design here. |
-| [#648 — OpenShift cold-start POC](https://github.com/syntara-orchestration/syntara/pull/648) | Keep as a historical POC until it is compared with #723/#701; port only unmerged work that remains needed. |
+| Source PR | Status in this migration | New home or follow-up |
+| --- | --- | --- |
+| [#723 — Kubernetes worker manager](https://github.com/syntara-orchestration/syntara/pull/723) | Adapted | Alan's backend-specific worker-manager structure is in [`vanilla_k8s`](../../src/execution_plane/worker_manager/vanilla_k8s/manager.py), with the SDK gRPC client in [`node_protocol`](../../src/execution_plane/node_protocol/client.py). The first backend uses a single-attempt Job; WorkItem state is independent of Job/Pod state. |
+| [#725 — target metadata and platform mapping](https://github.com/syntara-orchestration/syntara/pull/725) | Migrated across both PRs | EP owns typed placement, clusters, targets, and persistence. AO owns the integration surface and synchronizes its desired state through the EP API. |
+| [#727 — Kubernetes Resource Monitor design](https://github.com/syntara-orchestration/syntara/pull/727) | Documentation migrated | [`resource-monitor.md`](../resource-monitor.md) retains the resource-monitor design; this implementation keeps serial dispatch for the first release and does not claim capacity-aware scheduling. |
+| [#747 — public node images](https://github.com/syntara-orchestration/syntara/pull/747) | Adapted | AO defaults only the first-release script node to a digest-pinned image. Moving image publication to an organization-owned pipeline remains a revisit item. |
+| [#749 — Kind integration test](https://github.com/syntara-orchestration/syntara/pull/749) | Not carried as an end-to-end test | The merged harness wired Kind credentials into AO tests, but those tests use AO's fake EP HTTP client; it did not start the standalone EP API/worker or exercise the service boundary. The combined-service procedure is documented in [`kind-demo-runbook.md`](../kind-demo-runbook.md), and still needs to be run against built AO/EP images. |
+| [#741 — Konflux cold-start pipeline](https://github.com/syntara-orchestration/syntara/pull/741) | Old pipeline removed; replacement pending | Its scripts ran EP migrations from an AO backend and wrote EP tables directly, so they cannot validate the isolated topology. Re-enable a Konflux E2E pipeline after EP image publication and standalone database/API/worker deployment are available to that pipeline. |
+| [#701 — SDK node containers](https://github.com/syntara-orchestration/syntara/pull/701) | Protocol vendored; image publishing remains upstream work | The gRPC contract and generated client are vendored from step-types PR #2; see [`node-protocol-vendoring.md`](../node-protocol-vendoring.md). The node image build/publish workflow is not owned by these service PRs. |
+| [#673 — workload data sharing](https://github.com/syntara-orchestration/syntara/pull/673) | Still open upstream | Review and migrate any accepted design that remains relevant before closing or replacing that source PR. |
+| [#632 — cluster/target/scheduler design](https://github.com/syntara-orchestration/syntara/pull/632) | Closed upstream | Relevant accepted design is represented by EP's registry/placement docs and models; no source PR recreation is planned. |
+| [#648 — OpenShift cold-start POC](https://github.com/syntara-orchestration/syntara/pull/648) | Closed historical POC | Retained as design history only; the current gRPC cold-start implementation supersedes its execution path. |
 
-The initial inventory captured six open PRs. PR #727 appeared in the current open-PR list after that snapshot; its head is preserved in a supplemental bundle and `execution-plane-pr-inventory-update-2026-09-30.json`. The migration workspace also retains bundles of the source branch and the six initially inventoried PR heads, plus `execution-plane-pr-inventory.json`. None of these original PRs has been recreated, changed, or closed.
+The combined-service runbook is an unverified procedure, not evidence that the
+two PR heads have passed an end-to-end run. Its release gate is to run AO, EP
+API, EP worker, and the two separate databases together against a NetworkPolicy-
+enforcing Kubernetes cluster, then exercise callback loss, cancellation,
+restart, and uncertain Execute outcomes.

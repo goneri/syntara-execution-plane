@@ -68,11 +68,12 @@ async def test_run_worker_owns_drain_monitor_for_the_worker_lifetime(monkeypatch
         lambda target, cluster, work: _DrainMonitor(target, cluster, work, events),
     )
     monkeypatch.setattr(worker, "CompletionEventDelivery", lambda settings: _CompletionDelivery(settings, events))
-    monkeypatch.setattr(worker, "KubernetesJobManager", lambda _settings: object())
-    monkeypatch.setattr(worker, "build_placement_resolver", lambda _cluster, _target: object())
+    monkeypatch.setattr(worker, "VanillaK8sWorkerManager", lambda *_args: object())
+    monkeypatch.setattr(worker, "build_placement_resolver", lambda *_args: object())
     monkeypatch.setattr(worker, "_listen_loop", _finished_listener)
     monkeypatch.setattr(worker, "_poll_loop", _finished_poller)
     monkeypatch.setattr(worker, "run_cluster_binding_reconciler", _finished_reconciler)
+    monkeypatch.setattr(worker, "run_orphan_policy_reconciler", _finished_policy_reconciler)
 
     await worker.run_worker("postgresql+asyncpg://localhost/syntara")
 
@@ -89,4 +90,8 @@ async def _finished_poller(*_args: object) -> None:
 
 
 async def _finished_reconciler(_database_url: str) -> None:
+    return None
+
+
+async def _finished_policy_reconciler(*_args: object) -> None:
     return None

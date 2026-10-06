@@ -24,3 +24,16 @@ spec:
                 secretKeyRef:
                   name: execution-plane-db
                   key: migrator-url
+            - name: EP_CREDENTIAL_ENCRYPTION_KEY_PATH
+              value: /run/secrets/ep/credential-encryption-key
+          volumeMounts:
+            - name: ep-key
+              mountPath: /run/secrets/ep
+              readOnly: true
+      volumes:
+        - name: ep-key
+          secret:
+            secretName: execution-plane-keys
+            items:
+              - key: credential-encryption-key
+                path: credential-encryption-key

@@ -22,6 +22,7 @@ from execution_plane.models.completion_event import CompletionEvent
 from execution_plane.models.execution_target import ExecutionTarget, TargetStatus
 from execution_plane.models.work_item import WorkItem, WorkItemStatus
 from execution_plane.store_base import StoreBase
+from execution_plane.store_errors import StaleClaimError
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -165,24 +166,50 @@ class WorkStore(StoreBase):
             return list(result.scalars().all())
 
     async def claim_one(self) -> WorkItem | None:
-        """Claim queued work or recover a claim whose controller lease expired."""
+        """Claim queued work or safely recover a pre-dispatch claim lease."""
         lease_expiry = datetime.now(UTC) - timedelta(seconds=60)
         async with self._session_context() as session:
             try:
+                uncertain_result = await session.execute(
+                    select(WorkItem)
+                    .where(col(WorkItem.status).in_([WorkItemStatus.DISPATCHED, WorkItemStatus.CANCEL_REQUESTED]))
+                    .where(col(WorkItem.claimed_at) < lease_expiry)
+                    .with_for_update(skip_locked=True)
+                )
+                for uncertain in uncertain_result.scalars().all():
+                    cancellation_requested = uncertain.status is WorkItemStatus.CANCEL_REQUESTED
+                    uncertain.status = WorkItemStatus.RECONCILIATION_REQUIRED
+                    now = datetime.now(UTC)
+                    uncertain.result = {
+                        "error": "Worker lease expired after node dispatch may have started",
+                        "error_type": "WorkloadOutcomeUnknownError",
+                        "cancellation_requested": cancellation_requested,
+                    }
+                    uncertain.claim_owner_id = None
+                    uncertain.completed_at = now
+                    session.add(
+                        CompletionEvent(
+                            id=uuid.uuid4(),
+                            work_item_id=uncertain.id,
+                            client_id=uncertain.client_id,
+                            project_id=uncertain.project_id,
+                            request_id=uncertain.request_id,
+                            state_revision=1,
+                            status=WorkItemStatus.RECONCILIATION_REQUIRED.value,
+                            result=uncertain.result,
+                            created_at=now,
+                            next_attempt_at=now,
+                        )
+                    )
+                await session.commit()
+
                 result = await session.execute(
                     select(WorkItem)
                     .where(
                         or_(
                             col(WorkItem.status) == WorkItemStatus.PENDING,
                             and_(
-                                col(WorkItem.status).in_(
-                                    [
-                                        WorkItemStatus.CLAIMED,
-                                        WorkItemStatus.DISPATCHED,
-                                        WorkItemStatus.CANCEL_REQUESTED,
-                                        WorkItemStatus.RECONCILIATION_REQUIRED,
-                                    ]
-                                ),
+                                col(WorkItem.status) == WorkItemStatus.CLAIMED,
                                 col(WorkItem.claimed_at) < lease_expiry,
                             ),
                         )
@@ -225,19 +252,28 @@ class WorkStore(StoreBase):
                 if item.status is WorkItemStatus.PENDING:
                     item.status = WorkItemStatus.CLAIMED
                 item.claimed_at = datetime.now(UTC)
+                item.claim_owner_id = uuid.uuid4()
+                item.claim_generation += 1
                 await session.commit()
                 return item
             except Exception:
                 await session.rollback()
                 raise
 
-    async def mark_dispatched(self, item_id: uuid.UUID) -> bool:
+    async def mark_dispatched(
+        self,
+        item_id: uuid.UUID,
+        *,
+        claim_owner_id: uuid.UUID | None = None,
+        claim_generation: int | None = None,
+    ) -> bool:
         """Persist the external-dispatch boundary unless cancellation already won."""
         async with self._session_context() as session:
             try:
                 item = await session.get(WorkItem, item_id, with_for_update=True)
                 if item is None:
                     raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                self._validate_claim(item, claim_owner_id, claim_generation)
                 if item.status in {
                     WorkItemStatus.CANCEL_REQUESTED,
                     WorkItemStatus.COMPLETED,
@@ -257,12 +293,22 @@ class WorkStore(StoreBase):
                 await session.rollback()
                 raise
 
-    async def refresh_claim(self, item_id: uuid.UUID) -> bool:
+    async def refresh_claim(
+        self,
+        item_id: uuid.UUID,
+        *,
+        claim_owner_id: uuid.UUID | None = None,
+        claim_generation: int | None = None,
+    ) -> bool | None:
         """Renew the controller lease and report whether cancellation was requested."""
         async with self._session_context() as session:
             item = await session.get(WorkItem, item_id, with_for_update=True)
             if item is None:
-                return False
+                return None
+            try:
+                self._validate_claim(item, claim_owner_id, claim_generation)
+            except StaleClaimError:
+                return None
             if item.status in {
                 WorkItemStatus.CLAIMED,
                 WorkItemStatus.DISPATCHED,
@@ -273,11 +319,49 @@ class WorkStore(StoreBase):
                 await session.commit()
             return item.status is WorkItemStatus.CANCEL_REQUESTED
 
+    async def update_backend_resource(
+        self,
+        item_id: uuid.UUID,
+        *,
+        resource_name: str,
+        resource_uid: str | None,
+        cleanup_status: str,
+        cleanup_error: str | None = None,
+        claim_owner_id: uuid.UUID | None,
+        claim_generation: int,
+    ) -> None:
+        """Persist cold-start allocation identity and its independent cleanup state."""
+        async with self._session_context() as session:
+            try:
+                item = await session.get(WorkItem, item_id, with_for_update=True)
+                if item is None:
+                    raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                if item.claim_generation != claim_generation:
+                    raise StaleClaimError("Backend resource update belongs to a stale execution attempt")  # noqa: EM101, TRY003, TRY301
+                if cleanup_status == "pending":
+                    self._validate_claim(item, claim_owner_id, claim_generation)
+                elif item.backend_resource_name not in (None, resource_name):
+                    raise StaleClaimError("Backend resource update does not match the recorded allocation")  # noqa: EM101, TRY003, TRY301
+                if item.backend_resource_name != resource_name:
+                    item.backend_resource_uid = None
+                item.backend_resource_name = resource_name
+                if resource_uid is not None:
+                    item.backend_resource_uid = resource_uid
+                item.resource_cleanup_status = cleanup_status
+                item.resource_cleanup_error = cleanup_error[:1000] if cleanup_error else None
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
     async def set_result(
         self,
         item_id: uuid.UUID,
         result: dict[str, Any],
         status: WorkItemStatus,
+        *,
+        claim_owner_id: uuid.UUID | None = None,
+        claim_generation: int | None = None,
     ) -> WorkItem:
         """Atomically persist a terminal result and its completion outbox event."""
         async with self._session_context() as session:
@@ -285,12 +369,14 @@ class WorkStore(StoreBase):
                 item = await session.get(WorkItem, item_id, with_for_update=True)
                 if item is None:
                     raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                self._validate_claim(item, claim_owner_id, claim_generation)
                 if item.status in {WorkItemStatus.COMPLETED, WorkItemStatus.FAILED, WorkItemStatus.CANCELLED}:
                     return item
                 now = datetime.now(UTC)
                 item.result = result
                 item.status = status
                 item.completed_at = now
+                item.claim_owner_id = None
                 session.add(
                     CompletionEvent(
                         id=uuid.uuid4(),
@@ -338,29 +424,111 @@ class WorkStore(StoreBase):
                 await session.rollback()
                 raise
 
-    async def mark_reconciliation_required(self, item_id: uuid.UUID, reason: str) -> WorkItem:
+    async def mark_reconciliation_required(
+        self,
+        item_id: uuid.UUID,
+        reason: str,
+        *,
+        claim_owner_id: uuid.UUID | None = None,
+        claim_generation: int | None = None,
+    ) -> WorkItem:
         """Persist an uncertain external outcome without implying failure or rerunning it."""
         async with self._session_context() as session:
             try:
                 item = await session.get(WorkItem, item_id, with_for_update=True)
                 if item is None:
                     raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                self._validate_claim(item, claim_owner_id, claim_generation)
                 if item.status in {WorkItemStatus.COMPLETED, WorkItemStatus.FAILED, WorkItemStatus.CANCELLED}:
                     return item
                 cancel_requested = item.status is WorkItemStatus.CANCEL_REQUESTED
-                if not cancel_requested:
-                    item.status = WorkItemStatus.RECONCILIATION_REQUIRED
+                item.status = WorkItemStatus.RECONCILIATION_REQUIRED
+                now = datetime.now(UTC)
                 item.result = {
                     "error": reason[:1000],
                     "error_type": "WorkloadOutcomeUnknownError",
                     "cancellation_requested": cancel_requested,
                 }
-                item.claimed_at = datetime.now(UTC)
+                item.claimed_at = None
+                item.claim_owner_id = None
+                item.completed_at = now
+                session.add(
+                    CompletionEvent(
+                        id=uuid.uuid4(),
+                        work_item_id=item.id,
+                        client_id=item.client_id,
+                        project_id=item.project_id,
+                        request_id=item.request_id,
+                        state_revision=1,
+                        status=WorkItemStatus.RECONCILIATION_REQUIRED.value,
+                        result=item.result,
+                        created_at=now,
+                        next_attempt_at=now,
+                    )
+                )
                 await session.commit()
                 return item
             except Exception:
                 await session.rollback()
                 raise
+
+    async def requeue_pre_execute_failure(
+        self,
+        item_id: uuid.UUID,
+        *,
+        claim_owner_id: uuid.UUID,
+        claim_generation: int,
+    ) -> WorkItem:
+        """Return a proven pre-Execute failure to PENDING without changing request identity."""
+        async with self._session_context() as session:
+            try:
+                item = await session.get(WorkItem, item_id, with_for_update=True)
+                if item is None:
+                    raise WorkItemNotFoundError(item_id)  # noqa: TRY301
+                self._validate_claim(item, claim_owner_id, claim_generation)
+                if item.status is WorkItemStatus.CANCEL_REQUESTED:
+                    now = datetime.now(UTC)
+                    result = {"cancelled": True, "execution_started": False}
+                    item.result = result
+                    item.status = WorkItemStatus.CANCELLED
+                    item.completed_at = now
+                    item.claimed_at = None
+                    item.claim_owner_id = None
+                    session.add(
+                        CompletionEvent(
+                            id=uuid.uuid4(),
+                            work_item_id=item.id,
+                            client_id=item.client_id,
+                            project_id=item.project_id,
+                            request_id=item.request_id,
+                            state_revision=1,
+                            status=WorkItemStatus.CANCELLED.value,
+                            result=result,
+                            created_at=now,
+                            next_attempt_at=now,
+                        )
+                    )
+                elif item.status is WorkItemStatus.DISPATCHED:
+                    item.status = WorkItemStatus.PENDING
+                    item.claimed_at = None
+                    item.claim_owner_id = None
+                await session.commit()
+                return item
+            except Exception:
+                await session.rollback()
+                raise
+
+    @staticmethod
+    def _validate_claim(
+        item: WorkItem,
+        claim_owner_id: uuid.UUID | None,
+        claim_generation: int | None,
+    ) -> None:
+        """Fence a state change when the caller supplies its claim generation."""
+        if claim_owner_id is None and claim_generation is None:
+            return
+        if item.claim_owner_id != claim_owner_id or item.claim_generation != claim_generation:
+            raise StaleClaimError("Worker claim is no longer current")  # noqa: EM101, TRY003
 
     async def request_cancel_by_request_id(
         self,
@@ -424,6 +592,7 @@ class WorkStore(StoreBase):
             WorkItemStatus.FAILED,
             WorkItemStatus.CANCELLED,
             WorkItemStatus.CANCEL_REQUESTED,
+            WorkItemStatus.RECONCILIATION_REQUIRED,
         }:
             return
         now = datetime.now(UTC)
@@ -437,6 +606,8 @@ class WorkStore(StoreBase):
         item.status = WorkItemStatus.CANCELLED
         item.result = {"cancelled": True, "execution_started": False}
         item.completed_at = now
+        item.claimed_at = None
+        item.claim_owner_id = None
         session.add(
             CompletionEvent(
                 id=uuid.uuid4(),

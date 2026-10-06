@@ -46,7 +46,7 @@ class WorkItemSubmit(BaseModel):
         for key in ("inputs", "credentials", "workflow_context", "settings"):
             if not isinstance(invocation.get(key), dict):
                 msg = f"invocation.{key} must be an object"
-                raise TypeError(msg)
+                raise ValueError(msg)  # noqa: TRY004 — Pydantic maps ValueError to HTTP 422
         timeout = invocation.get("timeout_seconds")
         output_limit = invocation.get("max_output_bytes")
         if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:

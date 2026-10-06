@@ -70,7 +70,7 @@ metadata:
   namespace: {namespace}
 rules:
   - apiGroups: [""]
-    resources: ["secrets", "pods", "pods/log"]
+    resources: ["secrets", "pods", "pods/log", "pods/portforward"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["batch"]
     resources: ["jobs"]

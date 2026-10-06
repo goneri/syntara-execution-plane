@@ -41,6 +41,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from execution_plane.work_item_client import ep_service_token
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CLUSTER_NAME = "ep-kind"
 DEFAULT_NAMESPACE = "execution"
@@ -268,16 +270,6 @@ def connect_worker_to_kind_network() -> str | None:
     else:
         print(f"[WARN] Could not connect {worker} to {KIND_NETWORK}: {connected.stderr.strip()}")
     return worker
-
-
-def ep_service_token() -> str:
-    """Mint an AO service JWT with cluster-binding write scope."""
-    result = _run([sys.executable, str(PROJECT_ROOT / "tools" / "generate_jwt_for_ep.py")])
-    token = result.stdout.strip()
-    if not token:
-        msg = "generate_jwt_for_ep.py produced an empty token"
-        raise RuntimeError(msg)
-    return token
 
 
 def _ssl_context() -> ssl.SSLContext:

@@ -36,13 +36,16 @@ spec:
       value: "{{pull_request_number}}"
     - name: aap-dev-revision
       value: fix/ao-overlay-execution-plane
+    - name: ao-revision
+      value: devel
   taskRunTemplate:
     serviceAccountName: konflux-integration-runner
   pipelineSpec:
     description: |
-      Prototype: reuse the ao-api-tests Kind cluster (provision + deploy-ao),
-      prepare namespace execution-plane, then run the hello-world demo in a
-      dedicated test task. Does not run API tests.
+      Prototype: reuse the ao-api-tests Kind cluster (provision + deploy-ao at
+      ao-revision, not this Execution Plane PR), check out the Execution Plane
+      source, prepare namespace execution-plane, then run the hello-world demo
+      in a dedicated test task. Does not run API tests.
 
       Promote prepare-execution-plane into aap-konflux-pipelines when this path
       is proven; then restore a bundle pipelineRef.
@@ -66,6 +69,18 @@ spec:
       - name: aap-dev-revision
         type: string
         default: main
+      - name: ao-revision
+        type: string
+        description: >
+          Branch, tag, or SHA of syntara-orchestration/syntara for deploy-ao.
+          Independent of this Execution Plane pull request.
+        default: devel
+      - name: ao-pr-number
+        type: string
+        description: >
+          Optional syntara PR number so deploy-ao can fetch a fork head SHA.
+          Leave empty to check out ao-revision from the base syntara repo.
+        default: ""
       - name: oci-secret
         type: string
         default: quay-aap-ci-pipeline-artifacts-publisher
@@ -204,9 +219,9 @@ spec:
           - name: ao-github-app-secret
             value: $(params.ao-github-app-secret)
           - name: ao-revision
-            value: $(params.pipeline-github-pr-revision)
+            value: $(params.ao-revision)
           - name: ao-pr-number
-            value: $(params.pipeline-github-pr-number)
+            value: $(params.ao-pr-number)
           - name: ao-backend-replicas
             value: $(params.ao-backend-replicas)
         taskRef:
@@ -228,15 +243,35 @@ spec:
         params:
           - name: ssh-credentials-secret
             value: ssh-credentials-$(context.pipelineRun.name)
+          - name: ao-github-app-secret
+            value: $(params.ao-github-app-secret)
+          - name: pipeline-github-org
+            value: $(params.pipeline-github-org)
+          - name: pipeline-github-repo
+            value: $(params.pipeline-github-repo)
+          - name: pipeline-github-pr-revision
+            value: $(params.pipeline-github-pr-revision)
+          - name: pipeline-github-pr-number
+            value: $(params.pipeline-github-pr-number)
         taskSpec:
           description: |
-            Apply execution-plane-init.yaml to Kind 27-next-ao-operator
-            (namespace execution-plane), register the dispatcher SA as an
-            ExecutionTarget, deploy the EP worker, pre-pull the public
-            script-node image onto the Kind node, and enable script dispatch
-            on myao-worker.
+            Check out this Execution Plane revision, copy it to the Kind VM,
+            then run docs/feature-branch-assets/konflux-prepare-execution-plane.sh
+            to apply execution-plane-init.yaml, register the dispatcher SA,
+            deploy the EP worker, pre-pull the public script-node image, and
+            enable script dispatch on myao-worker.
           params:
             - name: ssh-credentials-secret
+              type: string
+            - name: ao-github-app-secret
+              type: string
+            - name: pipeline-github-org
+              type: string
+            - name: pipeline-github-repo
+              type: string
+            - name: pipeline-github-pr-revision
+              type: string
+            - name: pipeline-github-pr-number
               type: string
           results:
             - name: namespace
@@ -247,12 +282,17 @@ spec:
             - name: ssh-credentials-volume
               secret:
                 secretName: $(params.ssh-credentials-secret)
+            - name: nexus-github-app-volume
+              secret:
+                secretName: $(params.ao-github-app-secret)
           steps:
             - name: prepare
               image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:dc5a5570b7586cd207ed404534507f0b912e9d05bc44fd6b62b2eb4382a82024
               volumeMounts:
                 - name: ssh-credentials-volume
                   mountPath: /credentials/ssh
+                - name: nexus-github-app-volume
+                  mountPath: /credentials/nexus-github-app
               script: |
                 #!/usr/bin/env bash
                 set -euo pipefail
@@ -265,11 +305,64 @@ spec:
                 SSH_USER=$(cat /credentials/ssh/username 2>/dev/null || echo "ec2-user")
                 SSH_OPTS=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o BatchMode=yes)
 
+                GH_APP_ID=$(cat /credentials/nexus-github-app/orchestrator-ci-for-konflux-gh-app-id)
+                GH_INSTALL_ID=$(cat /credentials/nexus-github-app/orchestrator-ci-for-konflux-gh-app-install-id)
+                GH_PRIVATE_KEY=$(cat /credentials/nexus-github-app/orchestrator-ci-for-konflux-gh-app-private-key)
+
+                KEY_FILE=$(mktemp)
+                chmod 600 "${KEY_FILE}"
+                printf '%s' "${GH_PRIVATE_KEY}" > "${KEY_FILE}"
+
+                NOW=$(date +%s)
+                HEADER=$(printf '{"alg":"RS256","typ":"JWT"}' | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+                PAYLOAD=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((NOW - 60))" "$((NOW + 540))" "${GH_APP_ID}" | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+                SIG=$(printf '%s' "${HEADER}.${PAYLOAD}" | openssl dgst -sha256 -sign "${KEY_FILE}" | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+                rm -f "${KEY_FILE}"
+
+                JWT="${HEADER}.${PAYLOAD}.${SIG}"
+                GH_TOKEN=$(curl -sS -X POST \
+                  -H "Authorization: Bearer ${JWT}" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "https://api.github.com/app/installations/${GH_INSTALL_ID}/access_tokens" | jq -r '.token')
+                unset JWT GH_PRIVATE_KEY
+
+                if [ -z "${GH_TOKEN}" ] || [ "${GH_TOKEN}" = "null" ]; then
+                  echo "ERROR: Failed to obtain GitHub App installation token" >&2
+                  exit 1
+                fi
+
+                EP_DIR=/tmp/syntara-execution-plane
+                rm -rf "${EP_DIR}"
+                echo "=== Cloning execution-plane at $(params.pipeline-github-pr-revision) ==="
+                git -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+                  clone "https://github.com/$(params.pipeline-github-org)/$(params.pipeline-github-repo).git" "${EP_DIR}"
+                if [ -n "$(params.pipeline-github-pr-number)" ]; then
+                  git -C "${EP_DIR}" -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+                    fetch origin "refs/pull/$(params.pipeline-github-pr-number)/head"
+                fi
+                git -C "${EP_DIR}" checkout "$(params.pipeline-github-pr-revision)"
+                unset GH_TOKEN
+
+                PREPARE_SCRIPT="docs/feature-branch-assets/konflux-prepare-execution-plane.sh"
+                if [ ! -f "${EP_DIR}/${PREPARE_SCRIPT}" ]; then
+                  echo "ERROR: ${PREPARE_SCRIPT} not in execution-plane checkout" >&2
+                  exit 1
+                fi
+
+                echo "=== Copying execution-plane source to ${SSH_USER}@${SSH_HOST} ==="
+                ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
+                  "rm -rf \$HOME/syntara-execution-plane && mkdir -p \$HOME/syntara-execution-plane"
+                tar -C "${EP_DIR}" --exclude='.git' -czf - . \
+                  | ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" \
+                    "tar -xzf - -C \$HOME/syntara-execution-plane"
+
                 echo "=== Preparing execution-plane namespace on Kind 27-next-ao-operator ==="
                 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" "
                   set -euo pipefail
                   export KUBECONFIG=\$HOME/aap-dev/.tmp/27-next-ao-operator.kubeconfig
-                  bash \$HOME/syntara/backend/docs/execution-plane/konflux-prepare-execution-plane.sh
+                  export TOOLS_DIR=\$HOME/syntara/backend/execution-plane/tools
+                  bash \$HOME/syntara-execution-plane/${PREPARE_SCRIPT}
                 "
 
                 printf '%s' execution-plane > "$(results.namespace.path)"
@@ -315,7 +408,12 @@ spec:
                 ssh "${SSH_OPTS[@]}" "${SSH_USER}@${SSH_HOST}" "
                   set -euo pipefail
                   export KUBECONFIG=\$HOME/aap-dev/.tmp/27-next-ao-operator.kubeconfig
-                  bash \$HOME/syntara/backend/docs/execution-plane/konflux-run-hello-world-demo.sh
+                  DEMO_SCRIPT=\$HOME/syntara-execution-plane/docs/feature-branch-assets/konflux-run-hello-world-demo.sh
+                  if [ ! -f \"\${DEMO_SCRIPT}\" ]; then
+                    echo \"ERROR: \${DEMO_SCRIPT} missing; prepare-execution-plane must check out Execution Plane first\" >&2
+                    exit 1
+                  fi
+                  bash \"\${DEMO_SCRIPT}\"
                 "
 
     finally:

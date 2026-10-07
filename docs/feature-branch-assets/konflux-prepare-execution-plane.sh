@@ -24,7 +24,15 @@ KUBECONFIG="${KUBECONFIG:-${HOME}/aap-dev/.tmp/27-next-ao-operator.kubeconfig}"
 export KUBECONFIG
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-TOOLS_DIR=$(cd "${SCRIPT_DIR}/../../execution-plane/tools" && pwd)
+# Registration helpers live in the AO tree. deploy-ao clones syntara to
+# $HOME/syntara; honor TOOLS_DIR when the caller sets it (Konflux).
+if [[ -z "${TOOLS_DIR:-}" ]]; then
+  if [[ -d "${HOME}/syntara/backend/execution-plane/tools" ]]; then
+    TOOLS_DIR="${HOME}/syntara/backend/execution-plane/tools"
+  else
+    TOOLS_DIR=$(cd "${SCRIPT_DIR}/../../execution-plane/tools" && pwd)
+  fi
+fi
 INIT_YAML="${INIT_YAML:-${SCRIPT_DIR}/execution-plane-init.yaml}"
 WORKER_YAML="${WORKER_YAML:-${SCRIPT_DIR}/execution-plane-worker.yaml}"
 NAMESPACE="${NAMESPACE:-execution-plane}"

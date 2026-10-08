@@ -610,6 +610,8 @@ do not re-export from `__init__.py`.
   `available_targets` (no order is implied). On claim/provision failure, try
   another available target or fall back to a cluster default. On
   `NO_MATCHING_TARGETS`, re-queue if any ineligible reason is
-  `CAPACITY_EXHAUSTED`; otherwise fail.
+  `CAPACITY_EXHAUSTED`; otherwise fail. Volume-workspace reuse that
+  misses selectors on the pinned target is the same outcome; the
+  error explains that the volume pin is the constraint.
 - **AAP-92724 / AAP-92726:** replace the no-op health and policy filters
   without changing `ExecutionTargetReconciler.resolve`.

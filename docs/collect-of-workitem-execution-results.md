@@ -93,13 +93,13 @@ PUTs can finish at different times; the snapshot above is mid-flight.
 | Field | On the WorkItem | Meaning |
 |---|---|---|
 | `data.outputs[]` | payload, at submit | In-container file path to upload. No `uri`. |
-| `result.artifacts[].path` | result, from complete | Same path, so AO and the sidecar can match. |
-| `result.artifacts[].uri` | result, from complete | Object key minted at harvest. Sidecar GET-able only when `status` is `available`. UI may show it. |
-| `result.artifacts[].status` | result, from complete | `uploading`, `available`, or `failed`. UI. Sidecar waits; AO does not. |
+| `result.artifacts[].path` | result, from complete | Same path, so AO can match the listed output to the artifact. |
+| `result.artifacts[].uri` | result, from complete | Object key minted at harvest. GET-able only when `status` is `available`. UI may show it. |
+| `result.artifacts[].status` | result, from complete | `uploading`, `available`, or `failed`. UI. Consumer fetch waits; AO does not. |
 | `result.artifacts[].size` | result, from complete | File size in bytes, taken at harvest. |
 
 AO does not pick object keys before submit. There is no `data.inputs`
-list. `failed` means the PUT errored; the sidecar must not wait on
+list. `failed` means the PUT errored; the consumer must not wait on
 `uploading` forever.
 
 Push happens even on failure when a listed file exists: partial
@@ -123,25 +123,19 @@ cluster, another namespace, or no workspace at all).
 
 | Situation | How |
 |---|---|
-| **Same namespace** | GET an HTTP server on the **producer** WorkItem's sidecar. That sidecar outlives the activity container and exposes the harvested spool. Only reachable in that namespace. It can serve before the S3 PUT is `available`. |
-| **Other cluster / other namespace** | The consumer activity calls a **localhost HTTP API** on **its** sidecar. That sidecar holds object-store credentials and GETs S3. It retries until `available` or `failed`. |
+| **Shared workspace** | Read the path on disk. |
+| **No shared volume** | GET the object at `artifacts[].uri` once `status` is `available`. Retry while `uploading`; stop on `failed`. |
 
-A CLI is a wrapper around those HTTP APIs, not a second protocol.
-The activity image does not get S3 credentials.
-
-The sidecar is the observer the Completion Notifier cannot be: the
-next WorkItem is already running; the fetch blocks **inside the
-container at first use**. Same-namespace traffic hits the producer
-sidecar; cross-namespace traffic hits S3 through the consumer
-sidecar. Do not add a dedicated HTTP-activity WorkItem per artifact
-for this. HTTP and Git activities stay the path for AO-resolved
-**inputs** (file id → URL, Git SHA) into a
+The next WorkItem is already running; the fetch blocks **inside the
+container at first use**. Do not add a dedicated HTTP-activity
+WorkItem per artifact for this. HTTP and Git activities stay the
+path for AO-resolved **inputs** (file id → URL, Git SHA) into a
 [workspace](data-sharing-with-workspace.md).
 
-The sidecar is a way to speed up copies before S3 is `available`.
-The exact transport (routes, auth, OpenShell) needs a dedicated
-follow-up; this document only names the contract: localhost HTTP,
-credentials in the sidecar, not in the activity image.
+How the consumer authenticates to object storage, and whether a CLI
+wraps that GET, needs a dedicated follow-up. This document only names
+the contract: bytes live at the minted `uri`; chaining does not wait
+on the PUT.
 
 ## Payload shape
 
@@ -177,7 +171,7 @@ AO
     → Work Scheduler → Worker Manager
           copy listed paths aside, mint keys, complete, unmount
           S3 PUT from copy (background)
-          sidecar on later WorkItems → GET artifact (retry until available or failed)
+          later WorkItems → GET artifact at uri (retry until available or failed)
         → Work Watcher
               WorkItem.result (JSON + artifacts[].uri, status, size)
         → Completion Notifier → AO
@@ -187,8 +181,7 @@ AO
 |---|---|
 | Copy listed outputs aside, then unmount; S3 PUT from the copy (`status=uploading` → `available` or `failed`); does not gate the next WorkItem | Worker Manager |
 | Write `artifacts[]` on `WorkItem.result` (UI); patch `status` when a PUT finishes or fails | Work Watcher / Work Store |
-| Fetch listed outputs of a prior WorkItem when no shared volume | Same namespace: GET the producer sidecar HTTP server (spool). Else: consumer sidecar GETs S3 (holds credentials). |
-| Inject artifact sidecar (producer HTTP server and/or consumer localhost client) | Worker Manager |
+| Fetch listed outputs of a prior WorkItem when no shared volume | GET object storage at `artifacts[].uri` (retry until `available` or `failed`) |
 
 ## Sequence (listed outputs, no shared workspace)
 
@@ -199,7 +192,6 @@ sequenceDiagram
     participant WM as Worker Manager
     participant Play as playbook
     participant Cons as consumer
-    participant Side as sidecar
     participant S3 as object storage
 
     AO->>WS: WorkItem B { image: ansible-playbook, outputs: [/workspace/out/report.json] }
@@ -211,11 +203,10 @@ sequenceDiagram
     WM->>S3: PUT from copy (background)
 
     AO->>WS: WorkItem C { no shared volume }
-    WM->>Cons: start with sidecar on localhost
-    Cons->>Side: GET artifact /workspace/out/report.json
-    Side->>S3: GET (retry until available)
+    WM->>Cons: start
+    Cons->>S3: GET artifact (retry until available)
     WM->>WS: artifact status=available or failed (UI)
-    Side-->>Cons: file bytes
+    S3-->>Cons: file bytes
 ```
 
 ## Out of scope
@@ -225,16 +216,15 @@ sequenceDiagram
 | Workspace volume / snapshot | [data-sharing-with-workspace.md](data-sharing-with-workspace.md) |
 | Placement / selectors | [labels.md](labels.md) |
 | AO file upload, conversion, RBAC | [file-storage.md](https://github.com/syntara-orchestration/syntara/blob/devel/backend/docs/file-storage.md) |
-| In-container activity SDK beyond curl/CLI to the sidecar | Separate SDK design. Sidecar HTTP is this contract. |
-| Customer S3 IAM setup | Platform / credential work. Sidecar holds EP credentials; the activity image does not. |
+| In-container activity SDK | Separate SDK design. This contract is harvest + minted `uri`. |
+| Customer S3 IAM setup | Platform / credential work. |
 | Streaming stdout as files | Still `WorkItem.result` / log plumbing |
 
 ## Open questions
 
-1. **Sidecar transport.** Localhost HTTP is the contract. A CLI wraps
-   that API. Exact routes, auth to the sidecar, and OpenShell (no
-   sidecar) are implementation. Lean: HTTP on localhost, no S3 creds
-   in the activity image. This deserves a dedicated follow-up.
+1. **Consumer fetch.** Bytes are at the minted `uri` when `status` is
+   `available`. Auth, in-container client, and OpenShell are
+   implementation. This deserves a dedicated follow-up.
 2. **Failed runs and partial uploads.** Lean yes for listed
    `outputs`, so the author can inspect.
 3. **Minted object-key scheme.** Work item id + basename is enough
@@ -249,23 +239,19 @@ sequenceDiagram
 - **[data-sharing-with-workspace.md](data-sharing-with-workspace.md):** live `/workspace` across
   WorkItems. Listed outputs are harvested files, not that tree.
 - **[Worker Manager](worker-manager.md):** copies `data.outputs`
-  aside, unmounts, uploads from the copy in the background. Injects
-  the artifact sidecar: HTTP server on the producer WorkItem (same
-  namespace, serves the spool) and localhost client on consumers that
-  must GET S3. That PUT does not delay the next WorkItem.
+  aside, unmounts, uploads from the copy in the background.
+  That PUT does not delay the next WorkItem.
 - **[Work Store](work-store.md):** `WorkItem.result` stays small JSON
   (run status plus `artifacts[]` UI metadata: minted `uri`, `status`
   `uploading` | `available` | `failed`, and `size` in bytes). Artifact
   bytes are not a JSONB column. EP patches `artifacts[].status` when a
   background PUT finishes or fails. Chaining does not poll this;
-  the sidecar does.
+  the consumer GET does.
 - **[file-storage.md](https://github.com/syntara-orchestration/syntara/blob/devel/backend/docs/file-storage.md):** AO S3 for uploads. Listed
-  output PUT/GET credentials stay in the sidecar. EP does not import
-  `FileManager`.
+  output PUT is Worker Manager. EP does not import `FileManager`.
 - **AAP-92720 (Work Executor):** persist `payload.data`; validate
   output paths once a submission API exists.
 - **Container SDK (AO / EP, separate design):** listed-output
-  **fetch** is the Worker Manager sidecar: HTTP server on the producer
-  WorkItem (same namespace) or localhost client to S3. Optional CLI
-  wrapper. Harvest is copy-aside in the Worker Manager after exit, not
+  **fetch** is GET of the minted `uri` from object storage.
+  Harvest is copy-aside in the Worker Manager after exit, not
   an SDK inside the activity image.

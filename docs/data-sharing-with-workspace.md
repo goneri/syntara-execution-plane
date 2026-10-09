@@ -4,7 +4,7 @@ This document is the **workspace** contract: successive WorkItems in
 one Automation Orchestrator (AO) workflow share a directory.
 
 Collecting named files after a WorkItem exits (listed outputs,
-sidecar, S3 artifacts) is a **different** contract:
+S3 artifacts) is a **different** contract:
 [collect-of-workitem-execution-results.md](collect-of-workitem-execution-results.md).
 
 - Ticket: [AAP-94189](https://redhat.atlassian.net/browse/AAP-94189)
@@ -342,11 +342,11 @@ by this contract. The activity must write the body to a filesystem
 path (for example `dest`), not only into `WorkItem.result`.
 
 A later node that does not share the workspace pulls
-[listed outputs](collect-of-workitem-execution-results.md) through the Worker Manager
-sidecar, not through a second HTTP-activity WorkItem. A different
+[listed outputs](collect-of-workitem-execution-results.md),
+not through a second HTTP-activity WorkItem. A different
 target cannot mount that UUID; AO either shares a workspace on that
-target, uses an object-store snapshot, or the next node calls the
-sidecar.
+target, uses an object-store snapshot, or the next node fetches the
+listed artifacts from object storage.
 
 ### Git
 
@@ -546,7 +546,7 @@ sequenceDiagram
 
 | Omitted | Why |
 |---|---|
-| Listed outputs / sidecar / S3 artifacts | [collect-of-workitem-execution-results.md](collect-of-workitem-execution-results.md) |
+| Listed outputs / S3 artifacts | [collect-of-workitem-execution-results.md](collect-of-workitem-execution-results.md) |
 | Placement / selectors | [labels.md](labels.md) |
 | Live PVC / Podman volume or disk capacity as a selector | Not a label. Open question in labels.md. |
 | AO file upload, conversion, RBAC | [file-storage.md](https://github.com/syntara-orchestration/syntara/blob/devel/backend/docs/file-storage.md) |

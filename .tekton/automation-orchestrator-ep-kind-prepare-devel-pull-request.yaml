@@ -257,8 +257,9 @@ spec:
           description: |
             Check out this Execution Plane revision, copy it to the Kind VM,
             then run docs/feature-branch-assets/konflux-prepare-execution-plane.sh
-            to apply deploy/kubernetes/execution-target/rbac.yaml, register the dispatcher SA,
-            deploy the EP worker, pre-pull the public script-node image, and
+            to apply dispatcher RBAC, deploy the standalone EP API/worker from
+            the aap-dev ep image (no AO operator change), register the Kind
+            cluster through the EP API, pre-pull the script-node image, and
             enable script dispatch on myao-worker.
           params:
             - name: ssh-credentials-secret
@@ -287,7 +288,7 @@ spec:
                 secretName: $(params.ao-github-app-secret)
           steps:
             - name: prepare
-              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:dc5a5570b7586cd207ed404534507f0b912e9d05bc44fd6b62b2eb4382a82024
+              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:6625997cac261e12aa0437ff2b0b0aa0275a4fa8ff3f833c21f8f029880d5c88
               volumeMounts:
                 - name: ssh-credentials-volume
                   mountPath: /credentials/ssh
@@ -386,7 +387,7 @@ spec:
                 secretName: $(params.ssh-credentials-secret)
           steps:
             - name: run-demo
-              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:dc5a5570b7586cd207ed404534507f0b912e9d05bc44fd6b62b2eb4382a82024
+              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:6625997cac261e12aa0437ff2b0b0aa0275a4fa8ff3f833c21f8f029880d5c88
               volumeMounts:
                 - name: ssh-credentials-volume
                   mountPath: /credentials/ssh
@@ -433,7 +434,7 @@ spec:
                 secretName: $(params.ssh-credentials-secret)
           steps:
             - name: collect-logs
-              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:ea178dd69e504bb91683537dbc9c59dc17265dc27b9ef6f36eca92d1b24d3d3e
+              image: quay.io/aap-ci/tekton-catalog/task-runner/ansible:0.1@sha256:6625997cac261e12aa0437ff2b0b0aa0275a4fa8ff3f833c21f8f029880d5c88
               volumeMounts:
                 - name: ssh-credentials-volume
                   mountPath: /credentials/ssh

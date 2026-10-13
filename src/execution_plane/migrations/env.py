@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from alembic import context
 from sqlalchemy import Table, pool, text
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
 if TYPE_CHECKING:
@@ -42,7 +42,10 @@ database_url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATAB
 if not database_url:
     msg = "DATABASE_URL must be set or sqlalchemy.url provided in alembic.ini"
     raise RuntimeError(msg)
-config.set_main_option("sqlalchemy.url", database_url)
+
+# Do not round-trip the URL through Config.set_main_option. Alembic's ConfigParser
+# interpolates ``%``, so a percent-encoded password (%7B, %40, …) raises
+# ValueError: invalid interpolation syntax. Keep the raw URL for the engine.
 
 
 def include_object(
@@ -60,9 +63,8 @@ def include_object(
 
 def run_migrations_offline() -> None:
     """Generate migration SQL without opening a database connection."""
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=database_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -93,11 +95,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Connect asynchronously and prepare the execution-plane schema."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(database_url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {EP_SCHEMA}"))
         await connection.commit()

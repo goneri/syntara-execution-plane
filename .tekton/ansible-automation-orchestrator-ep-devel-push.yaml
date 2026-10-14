@@ -15,6 +15,7 @@ metadata:
         x == "Containerfile" ||
         x == "pyproject.toml" ||
         x == "uv.lock" ||
+        x == "requirements.txt" ||
         x == "alembic.ini" ||
         x == "LICENSE") ||
       ".tekton/ansible-automation-orchestrator-ep-devel-push.yaml".pathChanged())

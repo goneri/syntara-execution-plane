@@ -37,6 +37,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Regenerates requirements.txt from uv.lock and fails if the committed file
+  # differs. Cachi2 pip prefetch needs this hashed file; uv.lock is not enough.
+  # To fix: run `make sync-requirements` and commit the result.
+  requirements-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: make sync-requirements
+      - name: Fail if requirements.txt has uncommitted changes
+        run: |
+          if ! git diff --exit-code -- requirements.txt; then
+            echo "requirements.txt is out of sync. Run 'make sync-requirements' and commit the result."
+            exit 1
+          fi
+
   # Regenerates openapi.yaml and fails if the committed file differs.
   # To fix: run `uv run python tools/export_openapi.py` and commit the result.
   openapi-drift:

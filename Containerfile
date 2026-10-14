@@ -10,12 +10,22 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-RUN pip3.12 install --no-cache-dir uv==0.12.3
+# Konflux hermetic builds override BUILDER_IMAGE to uv-builder-rhel9, which
+# already ships uv and has no pip3.12. The default UBI Python image still
+# needs the pip install. Do not reach PyPI when uv is already on PATH.
+RUN (command -v uv >/dev/null 2>&1 || pip3.12 install --no-cache-dir uv==0.12.3) \
+    && [ -f /usr/local/bin/uv ] || ln -s "$(command -v uv)" /usr/local/bin/uv
 
 COPY pyproject.toml uv.lock README.md alembic.ini ./
 COPY src/ ./src/
 
-RUN uv sync --frozen --no-dev --no-editable
+# Hermetic Konflux: cachi2.env injects PIP_FIND_LINKS; stay offline.
+# Local and GitHub Actions builds fall through to a normal uv sync.
+RUN if [ -n "${PIP_FIND_LINKS:-}" ]; then \
+        uv sync --frozen --no-dev --no-editable --no-index --find-links "${PIP_FIND_LINKS}" --offline; \
+    else \
+        uv sync --frozen --no-dev --no-editable; \
+    fi
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:8eb2830d0936237fc13a1f2f7e45aecf90d69043380ad167fad0343632937f41 AS runtime
 

@@ -1,4 +1,4 @@
-.PHONY: install test test-coverage coverage-combine test-integration lint format typecheck openapi migrate image secrets certs setup compose-up compose-down generate-token kind-target submit-work
+.PHONY: install test test-coverage coverage-combine test-integration lint format typecheck openapi migrate image secrets certs setup compose-up compose-down generate-token kind-target submit-work sync-requirements
 
 TEST_ARGS ?= --ignore=tests/integration
 COVERAGE_FILES ?= coverage-artifacts/*/.coverage
@@ -34,6 +34,12 @@ typecheck:
 
 openapi:
 	uv run python tools/export_openapi.py
+
+# Fully pinned, hashed lockfile for Cachi2/Hermeto pip prefetch.
+# Konflux does not read uv.lock; keep this in sync after dependency changes.
+sync-requirements:
+	uv export --frozen --python=3.12 --no-dev --no-editable --no-emit-package colorama --no-emit-workspace --output-file requirements.txt >/dev/null
+	python3 tools/ci/filter_requirements_hashes.py
 
 migrate:
 	uv run alembic -c alembic.ini upgrade head

@@ -331,11 +331,14 @@ json.dump(payload, sys.stdout)
     /opt/app-root/src/.venv/bin/python - <<'PY'
 import json
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import jwt
+
+from execution_plane_client.commands.clusters import ClusterProvision
 
 payload = json.loads(Path("/tmp/binding.json").read_text())
 key = Path("/tmp/jwt-primary.pem").read_text()
@@ -345,31 +348,49 @@ token = jwt.encode(
         "iss": payload["issuer"],
         "aud": "execution-plane",
         "client_id": "syntara-orchestration",
-        "scope": "cluster-bindings:read cluster-bindings:write execution-targets:read",
-        "all_projects": True,
+        "scope": "cluster.provision clusters:read execution-targets:read",
         "iat": now,
         "exp": now + timedelta(hours=1),
     },
     key,
     algorithm="ES256",
 )
-sid = payload["source_integration_id"]
+sid = uuid.UUID(payload["source_integration_id"])
+desired = payload["desired"]
 base = "https://127.0.0.1:8443"
 headers = {"Authorization": f"Bearer {token}"}
 with httpx.Client(verify=False, timeout=30.0) as client:
-    got = client.get(f"{base}/v1/cluster-bindings/{sid}", headers=headers)
+    got = client.get(f"{base}/v1/clusters/{sid}", headers=headers)
     revision = 1
     if got.status_code == 200:
         revision = int(got.json()["desired_revision"]) + 1
-    body = dict(payload["desired"], revision=revision)
-    put = client.put(f"{base}/v1/cluster-bindings/{sid}", headers=headers, json=body)
-    if put.status_code >= 400:
-        raise SystemExit(f"cluster-binding PUT failed ({put.status_code}): {put.text}")
-    print(f"upserted cluster binding {sid} revision {revision} status={put.status_code}")
+    envelope = ClusterProvision(
+        resource_key=sid,
+        desired_revision=revision,
+        name=desired["name"],
+        endpoint=desired["endpoint"],
+        namespace=desired["namespace"],
+        credential=desired["credential"],
+        ca_certificate=desired["ca_certificate"],
+        enabled=True,
+        labels=desired["labels"],
+    ).to_message(
+        source_id="syntara-orchestration",
+        destination_id="execution-plane",
+        client_id="syntara-orchestration",
+    )
+    posted = client.post(
+        f"{base}/v1/commands",
+        headers=headers,
+        json=envelope.model_dump(mode="json"),
+    )
+    if posted.status_code >= 400:
+        raise SystemExit(f"cluster.provision failed ({posted.status_code}): {posted.text}")
+    print(f"upserted cluster {sid} revision {revision} status={posted.status_code}")
     deadline = time.time() + 90
     while time.time() < deadline:
         status, message = "unknown", ""
-        got = client.get(f"{base}/v1/cluster-bindings/{sid}", headers=headers)
+        got = client.get(f"{base}/v1/clusters/{sid}", headers=headers)
         if got.status_code == 200:
             doc = got.json()
             status = doc.get("status") or "unknown"
@@ -381,7 +402,7 @@ with httpx.Client(verify=False, timeout=30.0) as client:
                 raise SystemExit(message or "cluster binding reconciliation failed")
         time.sleep(3)
     else:
-        raise SystemExit(f"timed out waiting for cluster binding {sid} to become ready")
+        raise SystemExit(f"timed out waiting for cluster {sid} to become ready")
     targets = client.get(f"{base}/v1/execution-targets", headers=headers)
     if targets.status_code >= 400:
         raise SystemExit(f"listing execution targets failed ({targets.status_code}): {targets.text}")

@@ -30,7 +30,7 @@ def test_build_payload_is_accepted_by_work_item_submit_schema() -> None:
         timeout_seconds=60,
         environment={},
     )
-    WorkItemSubmit(request_id="req-1", work_correlation_id=uuid4(), payload=payload)
+    WorkItemSubmit(id=uuid4(), payload=payload)
     assert payload["image"] == DEFAULT_NODE_IMAGE
     assert payload["invocation"]["version"] == 1
     assert payload["invocation"]["operation"] == "execute"
@@ -47,7 +47,7 @@ def test_build_payload_includes_environment_and_image_override() -> None:
     )
     assert payload["image"] == "quay.io/example/node:dev"
     assert payload["invocation"]["inputs"]["environment"] == {"FOO": "bar"}
-    WorkItemSubmit(request_id="req-2", work_correlation_id=uuid4(), payload=payload)
+    WorkItemSubmit(id=uuid4(), payload=payload)
 
 
 def test_build_payload_rejects_invalid_timeout_through_schema() -> None:
@@ -58,7 +58,7 @@ def test_build_payload_rejects_invalid_timeout_through_schema() -> None:
         environment={},
     )
     with pytest.raises(ValidationError, match="timeout_seconds"):
-        WorkItemSubmit(request_id="req-3", work_correlation_id=uuid4(), payload=payload)
+        WorkItemSubmit(id=uuid4(), payload=payload)
 
 
 def test_service_token_claims_include_project_id() -> None:

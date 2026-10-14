@@ -205,14 +205,12 @@ def submit_work_item(
     api_url: str,
     token: str,
     *,
-    request_id: str,
-    work_correlation_id: uuid.UUID,
+    item_id: uuid.UUID,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     """POST one script work item and return the accepted record."""
     body = {
-        "request_id": request_id,
-        "work_correlation_id": str(work_correlation_id),
+        "id": str(item_id),
         "workload_type": "script",
         "payload": payload,
     }
@@ -226,9 +224,9 @@ def submit_work_item(
     return response
 
 
-def get_work_item(api_url: str, token: str, request_id: str) -> dict[str, Any] | None:
-    """Read a work item by stable request ID, or None if it is not visible yet."""
-    status, response = ep_request("GET", f"{api_url.rstrip('/')}/v1/work-items/by-request/{request_id}", token)
+def get_work_item(api_url: str, token: str, work_id: uuid.UUID) -> dict[str, Any] | None:
+    """Read a work item by id, or None if it is not visible yet."""
+    status, response = ep_request("GET", f"{api_url.rstrip('/')}/v1/work-items/{work_id}", token)
     if status == HTTPStatus.NOT_FOUND:
         return None
     if status >= HTTPStatus.BAD_REQUEST:
@@ -255,7 +253,7 @@ def list_execution_targets(api_url: str, token: str) -> list[dict[str, Any]]:
 def wait_for_work_item(
     api_url: str,
     token: str,
-    request_id: str,
+    work_id: uuid.UUID,
     timeout_seconds: int,
     *,
     on_status: Callable[[str], None] | None = None,
@@ -264,7 +262,7 @@ def wait_for_work_item(
     deadline = time.time() + timeout_seconds
     latest: dict[str, Any] | None = None
     while time.time() < deadline:
-        latest = get_work_item(api_url, token, request_id)
+        latest = get_work_item(api_url, token, work_id)
         if latest is not None:
             status = str(latest.get("status"))
             if on_status is not None:
@@ -272,7 +270,7 @@ def wait_for_work_item(
             if status in TERMINAL_STATUSES:
                 return latest
         time.sleep(_POLL_PAUSE_SECONDS)
-    msg = f"Timed out waiting for work item {request_id} to finish"
+    msg = f"Timed out waiting for work item {work_id} to finish"
     if latest is not None:
         msg = f"{msg}: {json.dumps(latest, default=str)}"
     raise TimeoutError(msg)

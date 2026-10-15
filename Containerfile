@@ -16,13 +16,31 @@ ENV PYTHONUNBUFFERED=1 \
 RUN (command -v uv >/dev/null 2>&1 || pip3.12 install --no-cache-dir uv==0.12.3) \
     && [ -f /usr/local/bin/uv ] || ln -s "$(command -v uv)" /usr/local/bin/uv
 
-COPY pyproject.toml uv.lock README.md alembic.ini ./
+COPY pyproject.toml requirements.txt uv.lock README.md alembic.ini ./
 COPY src/ ./src/
 
-# Hermetic Konflux: cachi2.env injects PIP_FIND_LINKS; stay offline.
-# Local and GitHub Actions builds fall through to a normal uv sync.
+# Hermetic Konflux / local Hermeto: PIP_FIND_LINKS points at prefetched sdists.
+# uv.lock records platform wheels; do not use it (or any binary) offline.
+# Networked builds keep uv sync --frozen.
 RUN if [ -n "${PIP_FIND_LINKS:-}" ]; then \
-        uv sync --frozen --no-dev --no-editable --no-index --find-links "${PIP_FIND_LINKS}" --offline; \
+        rm -f uv.lock && \
+        uv venv && \
+        UV_PYTHON_DOWNLOADS=never uv pip install \
+            --offline \
+            --no-index \
+            --no-cache \
+            --find-links "${PIP_FIND_LINKS}" \
+            --no-binary ':all:' \
+            --requirements ./requirements.txt && \
+        UV_PYTHON_DOWNLOADS=never uv pip install \
+            --offline \
+            --no-index \
+            --no-cache \
+            --find-links "${PIP_FIND_LINKS}" \
+            --no-binary ':all:' \
+            --no-deps \
+            ./src/execution_plane_client \
+            .; \
     else \
         uv sync --frozen --no-dev --no-editable; \
     fi
@@ -31,7 +49,7 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:8eb2830d0936237fc
 
 USER 0
 
-RUN microdnf install --setopt=install_weak_deps=0 --nodocs -y python3.12 python3.12-pip python3.12-cffi \
+RUN microdnf --disableplugin=subscription-manager install --setopt=install_weak_deps=0 --nodocs -y python3.12 python3.12-pip python3.12-cffi \
     && microdnf clean all
 
 RUN alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1

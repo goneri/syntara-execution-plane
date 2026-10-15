@@ -1,0 +1,31 @@
+# RPMs installed by the runtime stage (microdnf). After changing this list or
+# Containerfile, run: make sync-rpms-lock-yaml
+#
+# repoids must match:
+#   https://github.com/release-engineering/rhtap-ec-policy/blob/main/data/known_rpm_repositories.yml
+packages:
+  - python3.12
+  - python3.12-pip
+  - python3.12-cffi
+
+contentOrigin:
+  repos:
+    - repoid: ubi-9-for-$basearch-appstream-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/os/
+    - repoid: ubi-9-for-$basearch-appstream-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/appstream/source/SRPMS
+    - repoid: ubi-9-for-$basearch-baseos-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/os/
+    - repoid: ubi-9-for-$basearch-baseos-source-rpms
+      baseurl: https://cdn-ubi.redhat.com/content/public/ubi/dist/ubi9/9/$basearch/baseos/source/SRPMS
+
+arches:
+  - x86_64
+  - aarch64
+
+installWeakDeps: false
+
+context:
+  containerfile:
+    file: Containerfile
+    stageName: runtime

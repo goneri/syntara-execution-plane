@@ -16,6 +16,9 @@ metadata:
         x == "pyproject.toml" ||
         x == "uv.lock" ||
         x == "requirements.txt" ||
+        x == "requirements-build.txt" ||
+        x == "rpms.in.yaml" ||
+        x == "rpms.lock.yaml" ||
         x == "alembic.ini" ||
         x == "LICENSE") ||
       ".tekton/ansible-automation-orchestrator-ep-devel-push.yaml".pathChanged())
@@ -48,7 +51,7 @@ spec:
     - name: hermetic
       value: "true"
     - name: prefetch-input
-      value: '[{"type": "pip", "path": "."}]'
+      value: '[{"type": "pip", "path": "."}, {"type": "rpm", "path": "."}]'
     - name: prefetch-mode
       value: permissive
   pipelineRef:

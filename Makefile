@@ -1,4 +1,4 @@
-.PHONY: install test test-coverage coverage-combine test-integration lint format typecheck openapi migrate image secrets certs setup compose-up compose-down generate-token kind-target submit-work sync-requirements
+.PHONY: install test test-coverage coverage-combine test-integration lint format typecheck openapi migrate image secrets certs setup compose-up compose-down generate-token kind-target submit-work sync-requirements sync-rpms-lock-yaml
 
 TEST_ARGS ?= --ignore=tests/integration
 COVERAGE_FILES ?= coverage-artifacts/*/.coverage
@@ -35,11 +35,28 @@ typecheck:
 openapi:
 	uv run python tools/export_openapi.py
 
-# Fully pinned, hashed lockfile for Cachi2/Hermeto pip prefetch.
-# Konflux does not read uv.lock; keep this in sync after dependency changes.
+# Fully pinned, hashed lockfiles for Cachi2/Hermeto pip prefetch.
+# Konflux does not read uv.lock; keep these in sync after dependency changes.
+# requirements-build.txt is the PEP 517 backends needed to build those sdists
+# offline (setuptools, hatchling, cython, ...).
 sync-requirements:
 	uv export --frozen --python=3.12 --no-dev --no-editable --no-emit-package colorama --no-emit-package execution-plane-client --no-emit-workspace --output-file requirements.txt >/dev/null
-	python3 tools/ci/filter_requirements_hashes.py
+	uv run tools/ci/filter_requirements_hashes.py
+	uvx --from pybuild-deps==0.6.1 --python 3.12 pybuild-deps compile --generate-hashes -o requirements-build.txt requirements.txt
+
+# Resolve rpms.in.yaml against the runtime UBI image into rpms.lock.yaml.
+# Hermeto uses the lockfile to prefetch RPMs for isolated microdnf installs.
+RPM_LOCKFILE_IMAGE ?= localhost/rpm-lockfile-prototype:latest
+RPM_LOCKFILE_VERSION ?= v0.30.1
+
+sync-rpms-lock-yaml:
+	@if ! podman image exists "$(RPM_LOCKFILE_IMAGE)"; then \
+		echo "Building $(RPM_LOCKFILE_IMAGE) from rpm-lockfile-prototype $(RPM_LOCKFILE_VERSION)"; \
+		curl -fsSL "https://raw.githubusercontent.com/konflux-ci/rpm-lockfile-prototype/$(RPM_LOCKFILE_VERSION)/Containerfile" \
+			| podman build -t "$(RPM_LOCKFILE_IMAGE)" --build-arg "GIT_REF=tags/$(RPM_LOCKFILE_VERSION)" - ; \
+	fi
+	podman run --rm -v "$(CURDIR):/work:z" -w /work \
+		"$(RPM_LOCKFILE_IMAGE)" --outfile=/work/rpms.lock.yaml rpms.in.yaml
 
 migrate:
 	uv run alembic -c alembic.ini upgrade head

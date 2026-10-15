@@ -37,8 +37,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Regenerates requirements.txt from uv.lock and fails if the committed file
-  # differs. Cachi2 pip prefetch needs this hashed file; uv.lock is not enough.
+  # Regenerates requirements.txt / requirements-build.txt from uv.lock and fails
+  # if the committed files differ. Cachi2/Hermeto pip prefetch needs these hashed
+  # files; uv.lock is not enough.
   # To fix: run `make sync-requirements` and commit the result.
   requirements-drift:
     runs-on: ubuntu-latest
@@ -50,11 +51,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Create pybuild-deps cache directory
+        run: mkdir -p /home/runner/.cache/pybuild-deps
       - run: make sync-requirements
-      - name: Fail if requirements.txt has uncommitted changes
+      - name: Fail if requirements files have uncommitted changes
         run: |
-          if ! git diff --exit-code -- requirements.txt; then
-            echo "requirements.txt is out of sync. Run 'make sync-requirements' and commit the result."
+          if ! git diff --exit-code -- requirements.txt requirements-build.txt; then
+            echo "requirements files are out of sync. Run 'make sync-requirements' and commit the result."
             exit 1
           fi
 
@@ -70,6 +73,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: Create pybuild-deps cache directory
+        run: mkdir -p /home/runner/.cache/pybuild-deps
       - run: uv sync --locked --all-groups
       - run: uv run python tools/export_openapi.py
       - name: Fail if openapi.yaml has uncommitted changes

@@ -38,7 +38,7 @@ openapi:
 # Fully pinned, hashed lockfile for Cachi2/Hermeto pip prefetch.
 # Konflux does not read uv.lock; keep this in sync after dependency changes.
 sync-requirements:
-	uv export --frozen --python=3.12 --no-dev --no-editable --no-emit-package colorama --no-emit-workspace --output-file requirements.txt >/dev/null
+	uv export --frozen --python=3.12 --no-dev --no-editable --no-emit-package colorama --no-emit-package execution-plane-client --no-emit-workspace --output-file requirements.txt >/dev/null
 	python3 tools/ci/filter_requirements_hashes.py
 
 migrate:

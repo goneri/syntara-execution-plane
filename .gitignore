@@ -21,3 +21,7 @@ hermeto.env
 Containerfile.hermetic
 tmp_hermeto_conf
 requirements.txt.bak
+.worktrees/
+.vscode/
+.remember/
+docs/superpowers/

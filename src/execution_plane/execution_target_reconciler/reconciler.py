@@ -76,6 +76,18 @@ class ExecutionTargetReconciler:
         )
         return ReconcileResult(available, ineligible, outcome)
 
+    async def target_is_eligible(
+        self,
+        cluster: ClusterSnapshot,
+        target: ExecutionTargetSnapshot,
+        requirements: WorkRequirements,
+    ) -> bool:
+        """Evaluate one current target snapshot without resolving the full registry."""
+        if not cluster.enabled:
+            return False
+        verdict, _ = await self._evaluate(cluster, target, requirements)
+        return verdict is FilterVerdict.ELIGIBLE
+
     async def _evaluate(
         self,
         cluster: ClusterSnapshot,

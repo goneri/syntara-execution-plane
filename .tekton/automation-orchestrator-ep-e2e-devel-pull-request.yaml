@@ -46,12 +46,6 @@ spec:
       value: "{{revision}}"
     - name: pipeline-github-pr-number
       value: "{{pull_request_number}}"
-    - name: ep-git-url
-      value: "{{source_url}}"
-    - name: ep-revision
-      value: "{{revision}}"
-    - name: ep-pr-number
-      value: "{{pull_request_number}}"
     # Operator branch that honors ENABLE_EXECUTION_PLANE; the prebuilt devel
     # bundle ignores it (automation-orchestrator-operator#1573)
     - name: ao-operator-git-url
@@ -68,7 +62,7 @@ spec:
       - name: name
         value: ep-api-tests
       - name: bundle
-        value: quay.io/aap-ci/tekton-catalog/pipeline/test/ep-api-tests:0.1@sha256:141c4e95868fa55b4b6e0dcd3f98025538184dd554e6592d0e98521fbdc887c3
+        value: quay.io/aap-ci/tekton-catalog/pipeline/test/ep-api-tests:0.1@sha256:dfad30b2af8e73ef73619517c04f7f58d4075f90f16282ceb0b0f376dea287e5
       - name: kind
         value: pipeline
       - name: secret
